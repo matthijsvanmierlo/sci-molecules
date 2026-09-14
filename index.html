@@ -299,10 +299,25 @@
 
       <div class="tool-group">
         <h2>Templates</h2>
-        <div class="tool-list">
-          <button id="tpl-benzene">Insert benzene ring</button>
-          <button id="tpl-glycine">Insert glycine</button>
+        <div class="field">
+          <label for="template-select">Common compound</label>
+          <select id="template-select"></select>
         </div>
+        <div class="tool-list">
+          <button id="tpl-insert">Insert template</button>
+        </div>
+      </div>
+
+      <div class="tool-group">
+        <h2>Import SMILES</h2>
+        <div class="field">
+          <label for="smiles-input">Paste notation</label>
+          <input id="smiles-input" type="text" placeholder="e.g. CC(=O)Oc1ccccc1C(=O)O" autocomplete="off" spellcheck="false" />
+        </div>
+        <div class="tool-list">
+          <button id="smiles-insert">Import structure</button>
+        </div>
+        <p class="empty-note" id="smiles-error" role="alert"></p>
       </div>
     </nav>
 
@@ -384,12 +399,14 @@
         <summary>Keyboard shortcuts &amp; help</summary>
         <div class="details-body">
           <p><kbd>V</kbd> select &nbsp;<kbd>A</kbd> atom &nbsp;<kbd>B</kbd> bond &nbsp;<kbd>T</kbd> text &nbsp;<kbd>E</kbd> erase &nbsp;<kbd>R</kbd> arrow</p>
-          <p><kbd>C N O S P F H B</kbd> pick element while Atom tool is active</p>
+          <p><kbd>C N O S P F H</kbd> switch to the Atom tool with that element from anywhere &mdash; or, if you have an atom selected with the Select tool, relabel it instantly instead.</p>
           <p><kbd>Ctrl/Cmd+Z</kbd> undo &nbsp;<kbd>Ctrl/Cmd+Shift+Z</kbd> redo</p>
           <p><kbd>Delete</kbd> remove selection &nbsp;<kbd>Arrows</kbd> nudge selection or move keyboard cursor</p>
           <p><kbd>Enter</kbd> perform active tool at keyboard cursor &nbsp;<kbd>Esc</kbd> cancel</p>
           <p>Click an existing bond with the Bond tool to cycle single &rarr; double &rarr; triple &rarr; wedge &rarr; hash.</p>
           <p>Mouse wheel zooms toward the pointer. Hold <kbd>Space</kbd> and drag, or drag with the middle mouse button, to pan.</p>
+          <p>The Atom, Bond, and Erase tools stay active so you can place, chain, or clear several things in a row; Text and the reaction arrows switch back to Select after one, since you'll usually want to type or edit right away.</p>
+          <p>Templates and pasted SMILES both insert at the keyboard cursor's position, then hand control to the Select tool so you can drag the result into place.</p>
         </div>
       </details>
     </aside>
@@ -416,10 +433,14 @@ const STYLE_PRESETS = {
   RSC:       { bondLength:42, bondSpacing:0.16, bondWidth:1.5, boldWidth:5.0, hashCount:7, fontSize:15, arrowHead:11 }
 };
 
-// Standard valence table. Entries mapped to null are treated as "no check" (metals, variable valence).
+// Standard valence table. Each entry lists the accepted total-bond-order values for
+// that element (covering common higher-valence forms: sulfoxides/sulfones for S,
+// phosphates for P, nitro/ammonium for N, hypervalent iodine). null = no check
+// (metals, too variable to police usefully).
 const VALENCE = {
-  H:1, C:4, N:3, O:2, F:1, Cl:1, Br:1, I:1, S:2, P:3, B:3, Si:4, Se:2,
-  Na:1, K:1, Li:1, Mg:2, Zn:2, Cu:2, Fe:null, Pd:null, Pt:null
+  H:[1], C:[4], N:[3,5], O:[2], F:[1], Cl:[1], Br:[1], I:[1,3,5], S:[2,4,6], P:[3,5],
+  B:[3], Si:[4], Se:[2,4,6], Na:[1], K:[1], Li:[1], Mg:[2], Zn:[2], Cu:[1,2],
+  Fe:null, Pd:null, Pt:null
 };
 
 const MERGE_RADIUS = 12;      // px in world units, snapping a bond endpoint onto an existing atom
@@ -538,14 +559,26 @@ function atomLabelText(atom){
   return atom.element;
 }
 
+// hCount is "the H count to show": explicit if the atom carries one (e.g. from a
+// SMILES bracket atom like [nH]), otherwise inferred from the smallest accepted
+// valence that fits the existing bonds.
 function atomValenceInfo(atom){
-  const base = VALENCE[atom.element];
+  const options = VALENCE[atom.element];
   const bonds = bondsOfAtom(atom.id);
   const bondOrderSum = bonds.reduce((s, b) => s + (b.order || 1), 0);
-  if(base == null) return { checked:false, implicitH:0, overfilled:false };
-  const effective = base - atom.charge;
-  const implicitH = effective - bondOrderSum;
-  return { checked:true, implicitH: Math.max(0, implicitH), overfilled: implicitH < 0, bondOrderSum, effective };
+  if(options == null) return { checked:false, hCount:0, overfilled:false, bondOrderSum };
+
+  if(atom.explicitH != null){
+    const used = bondOrderSum + atom.explicitH;
+    const fits = options.some(v => used <= v - atom.charge);
+    return { checked:true, hCount: atom.explicitH, overfilled: !fits, bondOrderSum };
+  }
+  for(const opt of options){
+    const effective = opt - atom.charge;
+    if(bondOrderSum <= effective) return { checked:true, hCount: effective - bondOrderSum, overfilled:false, bondOrderSum, effective };
+  }
+  const maxEffective = Math.max(...options.map(o => o - atom.charge));
+  return { checked:true, hCount:0, overfilled:true, bondOrderSum, effective:maxEffective };
 }
 
 function chargeSuperscript(charge){
@@ -553,6 +586,439 @@ function chargeSuperscript(charge){
   const n = Math.abs(charge);
   const sign = charge > 0 ? "+" : "\u2212";
   return (n > 1 ? String(n) : "") + sign;
+}
+
+/* =========================================================================
+   4B. SMILES IMPORT ENGINE
+   A small parser (organic subset + bracket atoms + rings + branches),
+   ring-aware Kekule assignment, and a deterministic 2D layout with a light
+   relaxation pass. This is a simplified depiction engine, not a full
+   cheminformatics toolkit: no true aromaticity perception beyond simple
+   Kekule alternation, no stereochemistry from @/@@, and layout quality on
+   large fused/bridged systems is best-effort (the result stays fully
+   editable afterward, same as anything else drawn on the canvas).
+   ========================================================================= */
+const KNOWN_ELEMENTS = new Set([
+  "H","He","Li","Be","B","C","N","O","F","Ne","Na","Mg","Al","Si","P","S","Cl","Ar",
+  "K","Ca","Sc","Ti","V","Cr","Mn","Fe","Co","Ni","Cu","Zn","Ga","Ge","As","Se","Br","Kr",
+  "Rb","Sr","Y","Zr","Nb","Mo","Tc","Ru","Rh","Pd","Ag","Cd","In","Sn","Sb","Te","I","Xe",
+  "Cs","Ba","La","Ce","Pr","Nd","Pm","Sm","Eu","Gd","Tb","Dy","Ho","Er","Tm","Yb","Lu",
+  "Hf","Ta","W","Re","Os","Ir","Pt","Au","Hg","Tl","Pb","Bi","Po","At","Rn"
+]);
+const ORGANIC_SUBSET = new Set(["B","C","N","O","P","S","F","I","Cl","Br"]);
+const AROMATIC_VALENCE_OPTIONS = { C:[4], N:[3,5], O:[2], S:[2,4,6], P:[3,5], B:[3] };
+let SMILES_BOND_LENGTH = 40; // set from the active style preset just before each import
+
+function parseSmilesString(smiles){
+  smiles = smiles.trim();
+  let i = 0;
+  const atoms = [];
+  const bonds = [];
+  const stack = [];
+  let prev = -1;
+  let pendingBond = null;
+  const ringMap = {};
+
+  function newAtom(element, aromatic, charge, hcount, isotope){
+    const idx = atoms.length;
+    atoms.push({ element, aromatic: !!aromatic, charge: charge||0, hcount: (hcount==null?null:hcount), isotope: isotope||null });
+    if(prev !== -1){
+      const order = pendingBond || 1;
+      bonds.push({ a: prev, b: idx, order, ringClosure:false });
+    }
+    pendingBond = null;
+    prev = idx;
+    return idx;
+  }
+
+  function handleRingDigit(key){
+    if(ringMap[key] != null){
+      const other = ringMap[key];
+      const order = pendingBond || other.order || 1;
+      bonds.push({ a: other.atomIdx, b: prev, order, ringClosure:true });
+      delete ringMap[key];
+      pendingBond = null;
+    } else {
+      ringMap[key] = { atomIdx: prev, order: pendingBond };
+      pendingBond = null;
+    }
+  }
+
+  function parseBracketAtom(content){
+    let j = 0;
+    let isotope = null;
+    const isoMatch = /^(\d+)/.exec(content);
+    if(isoMatch){ isotope = parseInt(isoMatch[1],10); j += isoMatch[1].length; }
+    let element = null, aromatic = false;
+    const twoLetterMatch = /^(Cl|Br|Si|Se|Na|Mg|Zn|Cu|Fe|Pd|Pt|Li)/.exec(content.slice(j));
+    if(twoLetterMatch){ element = twoLetterMatch[1]; j += element.length; }
+    else {
+      const c = content[j];
+      if(c && /[a-z]/.test(c)){ element = c.toUpperCase(); aromatic = true; j++; }
+      else if(c && /[A-Z]/.test(c)){ element = c; j++; }
+      else throw new Error("Invalid bracket atom: [" + content + "]");
+    }
+    if(content[j] === "@"){ j++; if(content[j] === "@") j++; }
+    let hcount = 0;
+    if(content[j] === "H"){
+      j++;
+      const m = /^(\d*)/.exec(content.slice(j));
+      hcount = m[1] ? parseInt(m[1],10) : 1;
+      j += m[1].length;
+    }
+    let charge = 0;
+    if(content[j] === "+" || content[j] === "-"){
+      const sign = content[j] === "+" ? 1 : -1;
+      const signChar = content[j];
+      j++;
+      if(content[j] === signChar){
+        let count = 1;
+        while(content[j] === signChar){ count++; j++; }
+        charge = sign * count;
+      } else {
+        const m = /^(\d*)/.exec(content.slice(j));
+        charge = sign * (m[1] ? parseInt(m[1],10) : 1);
+        j += m[1].length;
+      }
+    }
+    if(content[j] === ":"){ j++; const m = /^(\d*)/.exec(content.slice(j)); j += m[1].length; }
+    if(j !== content.length) throw new Error("Could not fully parse bracket atom [" + content + "]");
+    if(!KNOWN_ELEMENTS.has(element)) throw new Error('Unknown element "' + element + '" in [' + content + "]");
+    newAtom(element, aromatic, charge, hcount, isotope);
+  }
+
+  while(i < smiles.length){
+    const ch = smiles[i];
+    if(ch === "("){ stack.push(prev); i++; continue; }
+    if(ch === ")"){
+      if(stack.length === 0) throw new Error("Unbalanced ')' at position " + i);
+      prev = stack.pop(); i++; continue;
+    }
+    if(ch === "."){ prev = -1; pendingBond = null; i++; continue; }
+    if(ch === "-"){ pendingBond = 1; i++; continue; }
+    if(ch === "="){ pendingBond = 2; i++; continue; }
+    if(ch === "#"){ pendingBond = 3; i++; continue; }
+    if(ch === ":"){ pendingBond = 1; i++; continue; }
+    if(ch === "/" || ch === "\\"){ i++; continue; }
+    if(ch === "%"){
+      const numStr = smiles.substr(i+1, 2);
+      if(!/^\d\d$/.test(numStr)) throw new Error("Malformed ring closure at position " + i);
+      handleRingDigit("%" + numStr); i += 3; continue;
+    }
+    if(/[0-9]/.test(ch)){ handleRingDigit(ch); i++; continue; }
+    if(ch === "["){
+      const close = smiles.indexOf("]", i);
+      if(close === -1) throw new Error("Unclosed bracket atom at position " + i);
+      parseBracketAtom(smiles.slice(i+1, close));
+      i = close + 1;
+      continue;
+    }
+    let matchedTwo = false;
+    for(const sym of ["Cl","Br"]){
+      if(smiles.substr(i, sym.length) === sym){ newAtom(sym, false, 0, null, null); i += sym.length; matchedTwo = true; break; }
+    }
+    if(matchedTwo) continue;
+    if(/[A-Z]/.test(ch)){
+      if(!ORGANIC_SUBSET.has(ch)) throw new Error('Element "' + ch + '" must be written in brackets, e.g. [' + ch + ']');
+      newAtom(ch, false, 0, null, null); i++; continue;
+    }
+    if("bcnops".includes(ch)){ newAtom(ch.toUpperCase(), true, 0, null, null); i++; continue; }
+    throw new Error('Unexpected character "' + ch + '" at position ' + i);
+  }
+
+  if(pendingBond !== null) throw new Error("Dangling bond symbol at the end of the SMILES string.");
+  if(atoms.length === 0) throw new Error("No atoms found in SMILES.");
+  if(stack.length !== 0) throw new Error("Unclosed '(' in SMILES.");
+  if(Object.keys(ringMap).length !== 0) throw new Error("Unclosed ring bond number in SMILES.");
+
+  return { atoms, bonds };
+}
+
+// For each ring-closure bond, the shortest path between its two atoms using
+// every OTHER bond, plus the closure bond itself, is the smallest ring
+// through that bond. Works for simple rings and edge-fused systems alike
+// (naphthalene- and purine-like cores).
+function detectSmilesRings(atoms, bonds){
+  const adj = atoms.map(() => []);
+  bonds.forEach((b, bi) => { adj[b.a].push({ to: b.b, bi }); adj[b.b].push({ to: b.a, bi }); });
+  const rings = [];
+  bonds.forEach((b, bi) => {
+    if(!b.ringClosure) return;
+    const prevNode = new Array(atoms.length).fill(-1);
+    const visited = new Array(atoms.length).fill(false);
+    const queue = [b.a];
+    visited[b.a] = true;
+    while(queue.length){
+      const cur = queue.shift();
+      if(cur === b.b) break;
+      for(const edge of adj[cur]){
+        if(edge.bi === bi) continue;
+        if(!visited[edge.to]){ visited[edge.to] = true; prevNode[edge.to] = cur; queue.push(edge.to); }
+      }
+    }
+    if(!visited[b.b]) return;
+    const path = [];
+    let cur = b.b;
+    while(cur !== -1){ path.push(cur); if(cur === b.a) break; cur = prevNode[cur]; }
+    path.reverse();
+    if(path[0] === b.a) rings.push(path);
+  });
+  return rings;
+}
+
+function findSmilesBond(bonds, a, b){
+  return bonds.find(bd => (bd.a === a && bd.b === b) || (bd.a === b && bd.b === a));
+}
+
+function kekulizeSmilesRings(atoms, bonds, rings){
+  rings.forEach(ring => {
+    const n = ring.length;
+    const ringBonds = ring.map((ai, k) => findSmilesBond(bonds, ai, ring[(k+1)%n]));
+    const allAromatic = ring.every((ai, k) => ringBonds[k] && atoms[ai].aromatic && atoms[ring[(k+1)%n]].aromatic);
+    if(!allAromatic) return;
+    const ringBondSet = new Set(ringBonds);
+
+    function otherBondsSum(atomIdx){
+      let sum = 0;
+      bonds.forEach(bd => {
+        if(ringBondSet.has(bd)) return;
+        if(bd.a === atomIdx || bd.b === atomIdx) sum += bd.order;
+      });
+      return sum;
+    }
+    function isLocked(atomIdx){
+      const at = atoms[atomIdx];
+      const options = AROMATIC_VALENCE_OPTIONS[at.element];
+      if(!options) return false;
+      const already = otherBondsSum(atomIdx) + (at.hcount || 0);
+      let base = options[options.length - 1];
+      for(const opt of options){ if(opt - at.charge >= already + 2){ base = opt; break; } }
+      const capacity = (base - at.charge) - already;
+      return capacity <= 2;
+    }
+
+    const locked = ring.map(ai => isLocked(ai));
+    let expectDouble = true;
+    for(let k=0;k<n;k++){
+      const forced = locked[k] || locked[(k+1)%n];
+      if(forced){ ringBonds[k].order = 1; expectDouble = true; }
+      else { ringBonds[k].order = expectDouble ? 2 : 1; expectDouble = !expectDouble; }
+    }
+  });
+}
+
+// Each atom gets an `arrival` angle (direction it was reached from) and a
+// `depth`. Chain atoms alternate +-60 degrees off the arrival angle for a
+// proper zigzag. Ring atoms get a radial "outward from ring centre" arrival
+// angle for their substituents. A collision search is the safety net.
+function layoutSmilesMolecule(atoms, bonds, rings){
+  const pos = atoms.map(() => null);
+  const arrival = atoms.map(() => 0);
+  const depth = atoms.map(() => 0);
+  const isRingAtom = atoms.map(() => false);
+  const placedRings = new Set();
+  const usedAngles = atoms.map(() => []);
+
+  function normalizeAngle(a){ while(a > Math.PI) a -= Math.PI*2; while(a < -Math.PI) a += Math.PI*2; return a; }
+  function angleFree(atomIdx, angle){ return !usedAngles[atomIdx].some(a => Math.abs(normalizeAngle(a-angle)) < 0.35); }
+  function claim(atomIdx, angle){ usedAngles[atomIdx].push(angle); }
+  function nextFreeAngle(atomIdx, preferred){
+    if(angleFree(atomIdx, preferred)) return preferred;
+    for(let step=1; step<=12; step++){
+      const delta = step * (Math.PI/12);
+      if(angleFree(atomIdx, preferred+delta)) return preferred+delta;
+      if(angleFree(atomIdx, preferred-delta)) return preferred-delta;
+    }
+    return preferred;
+  }
+
+  const adj = atoms.map(() => []);
+  bonds.forEach(b => { adj[b.a].push(b.b); adj[b.b].push(b.a); });
+  const ringOf = atoms.map(() => null);
+  rings.forEach((ring, ri) => ring.forEach(ai => { if(ringOf[ai] === null) ringOf[ai] = []; ringOf[ai].push(ri); }));
+
+  function setRingArrivals(ring, center){
+    ring.forEach(ai => { isRingAtom[ai] = true; arrival[ai] = Math.atan2(pos[ai].y-center.y, pos[ai].x-center.x); });
+    const n = ring.length;
+    ring.forEach((ai, k) => {
+      const nbA = ring[(k-1+n)%n], nbB = ring[(k+1)%n];
+      claim(ai, Math.atan2(pos[nbA].y-pos[ai].y, pos[nbA].x-pos[ai].x));
+      claim(ai, Math.atan2(pos[nbB].y-pos[ai].y, pos[nbB].x-pos[ai].x));
+    });
+  }
+
+  function placeRingFromOneAtom(ringIdx, anchorAtom, incomingAngle){
+    const ring = rings[ringIdx];
+    const n = ring.length;
+    const startPos = pos[anchorAtom];
+    const apothem = SMILES_BOND_LENGTH / (2*Math.tan(Math.PI/n));
+    const R = SMILES_BOND_LENGTH / (2*Math.sin(Math.PI/n));
+    const center = { x: startPos.x + apothem*Math.cos(incomingAngle), y: startPos.y + apothem*Math.sin(incomingAngle) };
+    const startVecAngle = Math.atan2(startPos.y-center.y, startPos.x-center.x);
+    const rotIdx = ring.indexOf(anchorAtom);
+    const ordered = ring.slice(rotIdx).concat(ring.slice(0,rotIdx));
+    for(let k=0;k<n;k++){
+      const ai = ordered[k];
+      if(pos[ai]) continue;
+      const a = startVecAngle + (Math.PI*2/n)*k;
+      pos[ai] = { x: center.x + R*Math.cos(a), y: center.y + R*Math.sin(a) };
+      depth[ai] = depth[anchorAtom] + 1;
+    }
+    setRingArrivals(ring, center);
+    placedRings.add(ringIdx);
+  }
+
+  function placeRingFromSharedEdge(ringIdx, knownA, knownB){
+    const ring = rings[ringIdx];
+    const n = ring.length;
+    const A = pos[knownA], B = pos[knownB];
+    const mid = { x:(A.x+B.x)/2, y:(A.y+B.y)/2 };
+    const edgeAngle = Math.atan2(B.y-A.y, B.x-A.x);
+    const apothem = SMILES_BOND_LENGTH / (2*Math.tan(Math.PI/n));
+    const R = SMILES_BOND_LENGTH / (2*Math.sin(Math.PI/n));
+    const perp = { x:-Math.sin(edgeAngle), y:Math.cos(edgeAngle) };
+    const c1 = { x: mid.x+perp.x*apothem, y: mid.y+perp.y*apothem };
+    const c2 = { x: mid.x-perp.x*apothem, y: mid.y-perp.y*apothem };
+    const placedPts = pos.filter(Boolean);
+    const centroid = placedPts.reduce((s,p)=>({x:s.x+p.x,y:s.y+p.y}),{x:0,y:0});
+    centroid.x /= placedPts.length; centroid.y /= placedPts.length;
+    const center = (Math.hypot(c1.x-centroid.x,c1.y-centroid.y) >= Math.hypot(c2.x-centroid.x,c2.y-centroid.y)) ? c1 : c2;
+    const rotIdx = ring.indexOf(knownA);
+    const ordered = ring.slice(rotIdx).concat(ring.slice(0,rotIdx));
+    let seq = ordered;
+    if(ordered[1] !== knownB) seq = [ordered[0]].concat(ordered.slice(1).reverse());
+    const startVecAngle = Math.atan2(A.y-center.y, A.x-center.x);
+    const towardB = Math.atan2(B.y-center.y, B.x-center.x);
+    const stepDir = normalizeAngle(towardB - startVecAngle) >= 0 ? 1 : -1;
+    for(let k=0;k<n;k++){
+      const ai = seq[k];
+      if(pos[ai]) continue;
+      const a = startVecAngle + stepDir*(Math.PI*2/n)*k;
+      pos[ai] = { x: center.x + R*Math.cos(a), y: center.y + R*Math.sin(a) };
+      depth[ai] = Math.max(depth[knownA], depth[knownB]) + 1;
+    }
+    setRingArrivals(ring, center);
+    placedRings.add(ringIdx);
+  }
+
+  pos[0] = { x:0, y:0 };
+  arrival[0] = -Math.PI/2;
+  let queue = [0];
+  const inQueue = new Set([0]);
+  function enqueueRing(ring){ ring.forEach(ai => { if(!inQueue.has(ai)){ queue.push(ai); inQueue.add(ai); } }); }
+
+  while(queue.length){
+    const cur = queue.shift();
+    if(ringOf[cur]){
+      for(const ri of ringOf[cur]){
+        if(placedRings.has(ri)) continue;
+        const ring = rings[ri];
+        const placedInRing = ring.filter(ai => pos[ai]);
+        if(placedInRing.length >= 2){
+          const n = ring.length;
+          let done = false;
+          for(let k=0;k<n && !done;k++){
+            const a = ring[k], b = ring[(k+1)%n];
+            if(pos[a] && pos[b]){ placeRingFromSharedEdge(ri, a, b); done = true; }
+          }
+          if(!done) placeRingFromOneAtom(ri, cur, nextFreeAngle(cur, arrival[cur]));
+        } else if(placedInRing.length === 1){
+          placeRingFromOneAtom(ri, cur, nextFreeAngle(cur, arrival[cur]));
+        }
+        enqueueRing(ring);
+      }
+    }
+    let branchCount = 0;
+    for(const nb of adj[cur]){
+      if(pos[nb]) continue;
+      let preferred;
+      if(isRingAtom[cur]){
+        preferred = branchCount === 0 ? arrival[cur] : arrival[cur] + branchCount * (Math.PI/2.2);
+      } else if(branchCount === 0){
+        const turn = (depth[cur] % 2 === 0) ? (Math.PI/3) : (-Math.PI/3);
+        preferred = arrival[cur] + turn;
+      } else {
+        preferred = arrival[cur] + Math.PI + branchCount * (Math.PI/2.2) * (branchCount % 2 === 0 ? 1 : -1);
+      }
+      const angle = nextFreeAngle(cur, preferred);
+      pos[nb] = { x: pos[cur].x + SMILES_BOND_LENGTH*Math.cos(angle), y: pos[cur].y + SMILES_BOND_LENGTH*Math.sin(angle) };
+      arrival[nb] = angle;
+      depth[nb] = depth[cur] + 1;
+      claim(cur, angle);
+      claim(nb, angle + Math.PI);
+      branchCount++;
+      if(!inQueue.has(nb)){ queue.push(nb); inQueue.add(nb); }
+    }
+  }
+
+  let offsetX = 0;
+  pos.forEach((p, idx) => { if(!p){ offsetX += SMILES_BOND_LENGTH*2; pos[idx] = { x: offsetX, y: 0 }; } });
+  return pos;
+}
+
+function relaxSmilesLayout(bonds, pos, iterations){
+  const n = pos.length;
+  const bondedSet = new Set(bonds.map(b => (b.a<b.b ? b.a+","+b.b : b.b+","+b.a)));
+  const isBonded = (i,j) => bondedSet.has(i<j ? i+","+j : j+","+i);
+  const MIN_SEP = 30;
+  for(let it=0; it<iterations; it++){
+    for(let i=0;i<n;i++){
+      for(let j=i+1;j<n;j++){
+        if(isBonded(i,j)) continue;
+        const dx = pos[j].x-pos[i].x, dy = pos[j].y-pos[i].y;
+        let d = Math.hypot(dx,dy);
+        if(d < MIN_SEP){
+          if(d < 0.01) d = 0.01;
+          const push = (MIN_SEP-d)/2 * 0.5;
+          const ux = dx/d, uy = dy/d;
+          pos[i].x -= ux*push; pos[i].y -= uy*push;
+          pos[j].x += ux*push; pos[j].y += uy*push;
+        }
+      }
+    }
+    bonds.forEach(b => {
+      const dx = pos[b.b].x-pos[b.a].x, dy = pos[b.b].y-pos[b.a].y;
+      let d = Math.hypot(dx,dy); if(d < 0.01) d = 0.01;
+      const diff = (d-SMILES_BOND_LENGTH)/d * 0.15;
+      const ox = dx*diff, oy = dy*diff;
+      pos[b.a].x += ox; pos[b.a].y += oy;
+      pos[b.b].x -= ox; pos[b.b].y -= oy;
+    });
+  }
+}
+
+function moleculeFromSmiles(smiles){
+  SMILES_BOND_LENGTH = currentStyle().bondLength;
+  const { atoms, bonds } = parseSmilesString(smiles);
+  const rings = detectSmilesRings(atoms, bonds);
+  kekulizeSmilesRings(atoms, bonds, rings);
+  const positions = layoutSmilesMolecule(atoms, bonds, rings);
+  relaxSmilesLayout(bonds, positions, 40);
+  return { atoms, bonds, positions };
+}
+
+// Bridges the parser's plain atom/bond arrays into real scene entities, offset
+// so the molecule's centre lands at `center`. Returns the new atom ids.
+function insertParsedMolecule(parsed, center){
+  const xs = parsed.positions.map(p => p.x), ys = parsed.positions.map(p => p.y);
+  const cx = (Math.min(...xs) + Math.max(...xs)) / 2;
+  const cy = (Math.min(...ys) + Math.max(...ys)) / 2;
+  const dx = center.x - cx, dy = center.y - cy;
+  const newIds = parsed.atoms.map((a, idx) => createAtomAt(
+    { x: parsed.positions[idx].x + dx, y: parsed.positions[idx].y + dy },
+    a.element,
+    { charge: a.charge, isotope: a.isotope, explicitH: a.hcount }
+  ));
+  parsed.bonds.forEach(b => {
+    const id = uid("bond");
+    state.scene.bonds[id] = { id, a1: newIds[b.a], a2: newIds[b.b], order: b.order, stereo: "NONE" };
+  });
+  return newIds;
+}
+
+function insertSmiles(smiles, center){
+  const parsed = moleculeFromSmiles(smiles);
+  return insertParsedMolecule(parsed, center);
 }
 
 /* =========================================================================
@@ -636,11 +1102,16 @@ async function loadOnStart(){
 /* =========================================================================
    7. SCENE MUTATIONS (used by both pointer and keyboard input paths)
    ========================================================================= */
-function addAtom(pos, element){
-  const p = snapToGrid(pos);
+function createAtomAt(pos, element, overrides){
   const id = uid("atom");
-  state.scene.atoms[id] = { id, element: element, x: p.x, y: p.y, charge: 0, isotope: null };
+  state.scene.atoms[id] = Object.assign(
+    { id, element: element, x: pos.x, y: pos.y, charge: 0, isotope: null, explicitH: null },
+    overrides || {}
+  );
   return id;
+}
+function addAtom(pos, element){
+  return createAtomAt(snapToGrid(pos), element);
 }
 
 function findAtomNear(pos, radius){
@@ -825,7 +1296,7 @@ function renderEntities(){
     }
     if(label){
       let text = label;
-      if(valence.checked && valence.implicitH > 0) text += "H" + (valence.implicitH > 1 ? subDigits(valence.implicitH) : "");
+      if(valence.checked && valence.hCount > 0) text += "H" + (valence.hCount > 1 ? subDigits(valence.hCount) : "");
       text += chargeSuperscript(atom.charge);
       const t = el("text", {
         x:atom.x, y:atom.y, "text-anchor":"middle", "dominant-baseline":"central",
@@ -994,7 +1465,7 @@ function renderAtomProps(body, atom){
   const valence = atomValenceInfo(atom);
   const info = document.createElement("p"); info.className = "empty-note";
   info.textContent = valence.checked
-    ? `${bondsOfAtom(atom.id).length} bond(s), ${valence.implicitH} implicit H` + (valence.overfilled ? " \u2014 valence exceeded" : "")
+    ? `${bondsOfAtom(atom.id).length} bond(s), ${valence.hCount} H` + (valence.overfilled ? " \u2014 valence exceeded" : "")
     : "Valence not checked for this element.";
   if(valence.overfilled) info.style.color = "var(--warn-tint)";
   body.appendChild(info);
@@ -1102,7 +1573,7 @@ function renderStructureSummary(){
       const v = atomValenceInfo(a);
       const bits = [a.element];
       if(a.charge) bits.push((a.charge>0?"+":"") + a.charge + " charge");
-      if(v.checked) bits.push(v.implicitH + " implicit H");
+      if(v.checked) bits.push(v.hCount + " H");
       if(v.overfilled) bits.push("VALENCE EXCEEDED");
       html += `<li class="${v.overfilled?'err':''}">${i+1}. ${bits.join(", ")} at (${Math.round(a.x)}, ${Math.round(a.y)})</li>`;
     });
@@ -1198,14 +1669,14 @@ function resetZoom(){
    ========================================================================= */
 const TOOL_DESCRIPTIONS = {
   select: "click an item to select and drag to move it.",
-  atom: "click the canvas to place an atom of the selected element.",
-  bond: "drag from an atom to draw a bond; click an existing bond to cycle its type.",
-  text: "click the canvas to add a text label.",
-  erase: "click any item to remove it.",
-  "arrow-forward": "drag to draw a forward reaction arrow.",
-  "arrow-eq": "drag to draw an equilibrium arrow.",
-  "arrow-res": "drag to draw a resonance arrow.",
-  "arrow-retro": "drag to draw a retrosynthetic arrow."
+  atom: "click the canvas to place an atom of the selected element. Stays active for placing several in a row.",
+  bond: "drag from an atom to draw a bond; click an existing bond to cycle its type. Stays active for a whole chain.",
+  text: "click the canvas to add a text label, then switches to Select so you can type into it.",
+  erase: "click any item to remove it. Stays active for erasing several in a row.",
+  "arrow-forward": "drag to draw a forward reaction arrow, then switches to Select so you can add conditions.",
+  "arrow-eq": "drag to draw an equilibrium arrow, then switches to Select so you can add conditions.",
+  "arrow-res": "drag to draw a resonance arrow, then switches to Select so you can add conditions.",
+  "arrow-retro": "drag to draw a retrosynthetic arrow, then switches to Select so you can add conditions."
 };
 const TOOL_LABELS = {
   select:"Select", atom:"Atom", bond:"Bond", text:"Text", erase:"Erase",
@@ -1288,14 +1759,12 @@ svg.addEventListener("pointerdown", (e) => {
   if(state.tool === "bond"){
     const hitAtom = findAtomNear(world);
     if(hitAtom){
-      const bond = findBondNear(world, 6);
-      if(bond && !hitAtom){ cycleBond(bond); pushHistory(); renderAll(); return; }
       dragState = { mode:"draw-bond", startAtomId: hitAtom.id };
       state.bondDraft = { startAtomId: hitAtom.id, x:hitAtom.x, y:hitAtom.y };
     } else {
       const existingBond = findBondNear(world, 6);
       if(existingBond){ cycleBond(existingBond); pushHistory(); renderAll(); announce("Bond type changed."); return; }
-      const newId = addAtom(world, "C");
+      const newId = addAtom(world, state.currentElement);
       dragState = { mode:"draw-bond", startAtomId: newId };
       state.bondDraft = { startAtomId: newId, x: world.x, y: world.y };
     }
@@ -1366,7 +1835,7 @@ function endPointerInteraction(e){
     const target = findAtomNear(endPos);
     let endId;
     if(target && target.id !== dragState.startAtomId) endId = target.id;
-    else endId = addAtom(endPos, state.currentElement === "H" ? "C" : "C");
+    else endId = addAtom(endPos, state.currentElement);
     if(endId !== dragState.startAtomId) createOrCycleBond(dragState.startAtomId, endId);
     state.bondDraft = null;
     pushHistory();
@@ -1440,7 +1909,13 @@ svg.addEventListener("keydown", (e) => {
   }
 
   if(e.key === "Escape"){
-    if(state.bondDraft){ state.bondDraft = null; renderEntities(); announce("Cancelled."); }
+    if(state.bondDraft || dragState){
+      state.bondDraft = null;
+      dragState = null;
+      svg.classList.remove("panning");
+      renderEntities();
+      announce("Cancelled.");
+    }
     else selectEntity(null, null);
     return;
   }
@@ -1501,14 +1976,14 @@ function performActiveToolAtCursor(){
   if(tool === "bond"){
     if(!state.bondDraft){
       const hit = findAtomNear(pos);
-      const startId = hit ? hit.id : addAtom(pos, "C");
+      const startId = hit ? hit.id : addAtom(pos, state.currentElement);
       state.bondDraft = { startAtomId: startId, x: state.scene.atoms[startId].x, y: state.scene.atoms[startId].y };
       announce("Bond start set. Move the keyboard cursor and press Enter to finish.");
     } else {
       const startAtom = state.scene.atoms[state.bondDraft.startAtomId];
       const endPos = snapAngleTo(startAtom, pos, null);
       const target = findAtomNear(endPos);
-      const endId = target && target.id !== state.bondDraft.startAtomId ? target.id : addAtom(endPos, "C");
+      const endId = target && target.id !== state.bondDraft.startAtomId ? target.id : addAtom(endPos, state.currentElement);
       if(endId !== state.bondDraft.startAtomId){ createOrCycleBond(state.bondDraft.startAtomId, endId); announce("Bond completed."); }
       state.bondDraft = null;
       pushHistory(); renderAll();
@@ -1546,15 +2021,31 @@ window.addEventListener("keydown", (e) => {
   if(mod && e.key.toLowerCase() === "y"){ e.preventDefault(); redo(); return; }
 
   const toolKeys = { v:"select", a:"atom", b:"bond", t:"text", e:"erase", r:"arrow-forward" };
+  const elKeys = { c:"C", n:"N", o:"O", s:"S", p:"P", f:"F", h:"H" }; // 'b' is reserved for the Bond tool below
   const k = e.key.toLowerCase();
-  if(toolKeys[k] && document.activeElement !== $("#doc-name")){
-    setTool(toolKeys[k]);
+
+  if(elKeys[k]){
+    // With an atom selected, an element key is a fast relabel (mirrors how
+    // chemistry drawing tools let you correct an atom without re-picking a
+    // tool). Otherwise it sets the element and switches to the Atom tool,
+    // so "type a letter, then click" works from anywhere.
+    if(state.tool === "select" && state.selection && state.selection.kind === "atom"){
+      const atom = state.scene.atoms[state.selection.id];
+      if(atom){
+        atom.element = elKeys[k];
+        pushHistory(); renderAll();
+        announce("Relabeled selected atom to " + elKeys[k] + ".");
+        return;
+      }
+    }
+    setElement(elKeys[k]);
+    if(state.tool !== "atom") setTool("atom");
     return;
   }
 
-  if(state.tool === "atom"){
-    const elKeys = { c:"C", n:"N", o:"O", s:"S", p:"P", f:"F", h:"H", b:"B" };
-    if(elKeys[k] && k !== "b"){ setElement(elKeys[k]); return; } // 'b' reserved for Bond tool above
+  if(toolKeys[k] && document.activeElement !== $("#doc-name")){
+    setTool(toolKeys[k]);
+    return;
   }
 });
 window.addEventListener("keyup", (e) => {
@@ -1606,7 +2097,7 @@ function buildExportSvg(){
     const label = atomLabelText(atom); if(!label) return;
     const v = atomValenceInfo(atom);
     let text = label;
-    if(v.checked && v.implicitH>0) text += "H" + (v.implicitH>1?subDigits(v.implicitH):"");
+    if(v.checked && v.hCount>0) text += "H" + (v.hCount>1?subDigits(v.hCount):"");
     text += chargeSuperscript(atom.charge);
     const w = Math.max(text.length*style.fontSize*0.62, style.fontSize*0.9);
     g.appendChild(el("rect", { x:atom.x-w/2, y:atom.y-style.fontSize*0.62, width:w, height:style.fontSize*1.2, fill:"#FFFFFF" }));
@@ -1711,33 +2202,85 @@ async function copyImage(){
 
 /* =========================================================================
    18. TEMPLATES
+   Every template is just a SMILES string, so the same import engine used
+   for pasted notation draws these — one code path, easy to extend.
    ========================================================================= */
-function insertBenzeneAt(cx, cy){
-  const r = currentStyle().bondLength * 0.85;
-  const ids = [];
-  for(let i=0;i<6;i++){
-    const angle = -Math.PI/2 + i * (Math.PI/3);
-    ids.push(addAtom({ x: cx + r*Math.cos(angle), y: cy + r*Math.sin(angle) }, "C"));
-  }
-  for(let i=0;i<6;i++){
-    const bond = createOrCycleBond(ids[i], ids[(i+1)%6]);
-    if(i % 2 === 0) state.scene.bonds[bond].order = 2;
-  }
-  pushHistory(); renderAll(); announce("Benzene ring inserted.");
+const TEMPLATES = [
+  ["Solvents & small molecules", [
+    ["Water", "O"], ["Methane", "C"], ["Ethanol", "CCO"], ["Acetone", "CC(=O)C"],
+    ["Diethyl ether", "CCOCC"], ["Dichloromethane", "ClCCl"], ["Chloroform", "ClC(Cl)Cl"],
+    ["Acetonitrile", "CC#N"], ["DMSO", "CS(=O)C"], ["THF", "C1CCOC1"], ["Toluene", "Cc1ccccc1"]
+  ]],
+  ["Functional groups", [
+    ["Carboxylic acid (acetic acid)", "CC(=O)O"], ["Ester (methyl acetate)", "CC(=O)OC"],
+    ["Amide (acetamide)", "CC(=O)N"], ["Amine (ethylamine)", "CCN"], ["Aldehyde (acetaldehyde)", "CC=O"],
+    ["Ether (dimethyl ether)", "COC"], ["Nitrile (acetonitrile)", "CC#N"], ["Urea", "NC(=O)N"],
+    ["Sulfone", "CS(=O)(=O)C"], ["Nitro group (nitromethane)", "C[N+](=O)[O-]"]
+  ]],
+  ["Rings & heterocycles", [
+    ["Benzene", "c1ccccc1"], ["Cyclohexane", "C1CCCCC1"], ["Cyclopentane", "C1CCCC1"],
+    ["Cyclopropane", "C1CC1"], ["Pyridine", "c1ccncc1"], ["Pyrimidine", "c1ccncn1"],
+    ["Furan", "c1ccoc1"], ["Thiophene", "c1ccsc1"], ["Pyrrole", "c1cc[nH]c1"], ["Imidazole", "c1cnc[nH]1"],
+    ["Naphthalene", "c1ccc2ccccc2c1"]
+  ]],
+  ["Amino acids", [
+    ["Glycine", "NCC(=O)O"], ["Alanine", "CC(N)C(=O)O"], ["Serine", "OCC(N)C(=O)O"],
+    ["Phenylalanine", "NC(Cc1ccccc1)C(=O)O"], ["Proline", "O=C(O)C1CCCN1"]
+  ]],
+  ["Familiar molecules", [
+    ["Aspirin", "CC(=O)Oc1ccccc1C(=O)O"], ["Ibuprofen", "CC(C)Cc1ccc(cc1)C(C)C(=O)O"],
+    ["Paracetamol", "CC(=O)Nc1ccc(O)cc1"], ["Caffeine", "Cn1cnc2c1c(=O)n(C)c(=O)n2C"],
+    ["Glucose", "OCC1OC(O)C(O)C(O)C1O"]
+  ]]
+];
+
+function populateTemplateSelect(){
+  const select = $("#template-select");
+  select.innerHTML = "";
+  TEMPLATES.forEach(([category, items]) => {
+    const group = document.createElement("optgroup");
+    group.label = category;
+    items.forEach(([name, smiles]) => {
+      const opt = document.createElement("option");
+      opt.value = smiles; opt.textContent = name;
+      group.appendChild(opt);
+    });
+    select.appendChild(group);
+  });
 }
 
-function insertGlycineAt(cx, cy){
-  const L = currentStyle().bondLength;
-  const n = addAtom({ x:cx-L, y:cy }, "N");
-  const ca = addAtom({ x:cx, y:cy }, "C");
-  const c = addAtom({ x:cx+L*0.87, y:cy-L*0.5 }, "C");
-  const o1 = addAtom({ x:cx+L*1.73, y:cy }, "O");
-  const o2 = addAtom({ x:cx+L*0.87, y:cy-L*1.5 }, "O");
-  createOrCycleBond(n, ca);
-  createOrCycleBond(ca, c);
-  createOrCycleBond(c, o1);
-  const dbl = createOrCycleBond(c, o2); state.scene.bonds[dbl].order = 2;
-  pushHistory(); renderAll(); announce("Glycine inserted.");
+function insertTemplateAtCursor(){
+  const select = $("#template-select");
+  const smiles = select.value;
+  const name = select.options[select.selectedIndex] ? select.options[select.selectedIndex].textContent : "Template";
+  try{
+    insertSmiles(smiles, state.keyboardCursor);
+    pushHistory();
+    setTool("select");
+    renderAll();
+    announce(name + " inserted.");
+  }catch(err){
+    announce("Couldn't insert that template: " + err.message);
+  }
+}
+
+function insertSmilesFromInput(){
+  const input = $("#smiles-input");
+  const errorEl = $("#smiles-error");
+  const raw = input.value.trim();
+  errorEl.textContent = "";
+  if(!raw){ errorEl.textContent = "Type or paste a SMILES string first."; return; }
+  try{
+    const ids = insertSmiles(raw, state.keyboardCursor);
+    pushHistory();
+    setTool("select");
+    renderAll();
+    announce("Imported structure with " + ids.length + " atom(s).");
+    input.value = "";
+  }catch(err){
+    errorEl.textContent = "Couldn't parse that SMILES: " + err.message;
+    announce("SMILES import failed: " + err.message);
+  }
 }
 
 /* =========================================================================
@@ -1764,8 +2307,13 @@ $("#btn-new-doc").addEventListener("click", () => {
   if(!confirm("Start a new document? Unsaved changes to the current one will be replaced.")) return;
   state.scene = emptyScene();
   state.selection = null;
+  state.bondDraft = null;
   state.history = []; state.historyIndex = -1;
   $("#doc-name").value = state.scene.title;
+  $("#smiles-input").value = "";
+  $("#smiles-error").textContent = "";
+  setTool("select");
+  setElement("C");
   pushHistory();
   renderAll();
   announce("New document started.");
@@ -1787,8 +2335,11 @@ $("#chk-angle-snap").addEventListener("change", (e) => { state.angleSnap = e.tar
 $("#font-scale").addEventListener("change", (e) => { document.body.style.fontSize = e.target.value + "px"; });
 $("#style-preset").addEventListener("change", (e) => { state.scene.stylePreset = e.target.value; pushHistory(); renderAll(); });
 
-$("#tpl-benzene").addEventListener("click", () => insertBenzeneAt(state.keyboardCursor.x, state.keyboardCursor.y));
-$("#tpl-glycine").addEventListener("click", () => insertGlycineAt(state.keyboardCursor.x, state.keyboardCursor.y));
+$("#tpl-insert").addEventListener("click", insertTemplateAtCursor);
+$("#smiles-insert").addEventListener("click", insertSmilesFromInput);
+$("#smiles-input").addEventListener("keydown", (e) => {
+  if(e.key === "Enter"){ e.preventDefault(); insertSmilesFromInput(); }
+});
 
 window.addEventListener("resize", () => {});
 
@@ -1796,6 +2347,7 @@ window.addEventListener("resize", () => {});
    20. INIT
    ========================================================================= */
 async function init(){
+  populateTemplateSelect();
   const loaded = await loadOnStart();
   if(!loaded){
     // Seed a tiny example (ethanol) so first-time users see how a structure looks.
