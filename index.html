@@ -1,0 +1,1823 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Bench &mdash; Molecular Structure Editor</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+
+  :root{
+    --bg-app:#12181C;
+    --panel-bg:#171E22;
+    --panel-bg-raised:#1D262B;
+    --panel-border:#2A363C;
+    --paper:#EDEFE9;
+    --grid-line:#D9DDD2;
+    --ink:#1F2937;
+    --ink-soft:#4B5A63;
+    --accent:#2F6F5E;
+    --accent-strong:#245A4C;
+    --accent-tint:#CDE7DE;
+    --warn:#B5541A;
+    --warn-tint:#F3D9C6;
+    --text-light:#E9EEEA;
+    --text-dim:#93A29B;
+    --focus:#7FD9BE;
+    --font-sans:'IBM Plex Sans', system-ui, -apple-system, sans-serif;
+    --font-mono:'IBM Plex Mono', ui-monospace, 'SFMono-Regular', monospace;
+    --stroke-mult:1;
+    --radius:3px;
+  }
+
+  body.hc{
+    --paper:#FFFFFF;
+    --grid-line:#B9C0B4;
+    --ink:#000000;
+    --accent:#00594A;
+    --accent-tint:#A9E6D2;
+    --warn:#8A2E00;
+    --panel-bg:#000000;
+    --panel-border:#5A6A62;
+    --text-light:#FFFFFF;
+    --text-dim:#D8E0DB;
+    --stroke-mult:1.6;
+    --focus:#FFD966;
+  }
+
+  *{ box-sizing:border-box; }
+  html,body{ height:100%; }
+  body{
+    margin:0;
+    background:var(--bg-app);
+    color:var(--text-light);
+    font-family:var(--font-sans);
+    font-size:14px;
+    overflow:hidden;
+  }
+  @media (prefers-reduced-motion: reduce){
+    *{ animation-duration:0.001ms !important; transition-duration:0.001ms !important; }
+  }
+
+  .sr-only{
+    position:absolute; width:1px; height:1px; padding:0; margin:-1px;
+    overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0;
+  }
+
+  a.skip-link{
+    position:absolute; left:8px; top:-40px; background:var(--accent);
+    color:#fff; padding:8px 12px; border-radius:var(--radius); z-index:200;
+    transition:top .15s ease;
+  }
+  a.skip-link:focus{ top:8px; }
+
+  button, select, input, textarea{
+    font-family:inherit; font-size:inherit; color:inherit;
+  }
+  button{
+    background:var(--panel-bg-raised);
+    border:1px solid var(--panel-border);
+    color:var(--text-light);
+    border-radius:var(--radius);
+    padding:6px 9px;
+    cursor:pointer;
+    line-height:1.2;
+  }
+  button:hover{ background:#223036; border-color:var(--accent); }
+  button[aria-pressed="true"], button.active{
+    background:var(--accent);
+    border-color:var(--accent);
+    color:#fff;
+  }
+  button:disabled{ opacity:.4; cursor:not-allowed; }
+
+  :focus-visible{
+    outline:3px solid var(--focus);
+    outline-offset:2px;
+  }
+  svg :focus, svg *:focus{ outline:none; }
+
+  #app{
+    display:grid;
+    grid-template-rows:auto 1fr auto;
+    height:100vh;
+  }
+
+  /* ---------- Header ---------- */
+  header.topbar{
+    display:flex; align-items:center; gap:14px;
+    padding:8px 14px;
+    background:var(--panel-bg);
+    border-bottom:1px solid var(--panel-border);
+    flex-wrap:wrap;
+  }
+  .brand{ display:flex; align-items:baseline; gap:8px; margin-right:6px;}
+  .brand h1{ font-size:16px; margin:0; font-weight:600; letter-spacing:.2px; }
+  .brand span{ font-size:11px; color:var(--text-dim); font-family:var(--font-mono); }
+  .doc-name{
+    background:transparent; border:1px solid transparent; padding:5px 8px;
+    border-radius:var(--radius); min-width:140px; color:var(--text-light);
+  }
+  .doc-name:hover, .doc-name:focus{ border-color:var(--panel-border); background:var(--panel-bg-raised); }
+  .btn-row{ display:flex; gap:6px; align-items:center; }
+  .divider{ width:1px; align-self:stretch; background:var(--panel-border); margin:0 2px; }
+  .spacer{ flex:1; }
+  .save-indicator{ font-size:11.5px; color:var(--text-dim); font-family:var(--font-mono); min-width:110px; text-align:right;}
+
+  /* ---------- Workspace ---------- */
+  .workspace{ display:grid; grid-template-columns:200px 1fr 300px; min-height:0; }
+
+  nav.tools{
+    background:var(--panel-bg);
+    border-right:1px solid var(--panel-border);
+    padding:10px;
+    overflow-y:auto;
+  }
+  .tool-group{ margin-bottom:14px; }
+  .tool-group h2{
+    font-size:10.5px; text-transform:uppercase; letter-spacing:.08em;
+    color:var(--text-dim); margin:0 0 6px 2px; font-weight:600;
+  }
+  .tool-grid{ display:grid; grid-template-columns:1fr 1fr; gap:6px; }
+  .tool-grid button{ text-align:left; }
+  .tool-list{ display:flex; flex-direction:column; gap:6px; }
+  .tool-list button{ text-align:left; display:flex; gap:8px; align-items:center; }
+  .element-grid{ display:grid; grid-template-columns:repeat(4,1fr); gap:5px; }
+  .element-grid button{
+    font-family:var(--font-mono); font-weight:600; text-align:center; padding:6px 2px;
+  }
+  .custom-el-row{ display:flex; gap:5px; margin-top:6px; }
+  .custom-el-row input{
+    width:100%; background:var(--panel-bg-raised); border:1px solid var(--panel-border);
+    border-radius:var(--radius); padding:5px 6px;
+  }
+  kbd{
+    font-family:var(--font-mono); background:var(--bg-app); border:1px solid var(--panel-border);
+    border-radius:3px; padding:0 4px; font-size:11px;
+  }
+
+  /* ---------- Canvas ---------- */
+  .canvas-wrap{ position:relative; background:var(--bg-app); overflow:hidden; }
+  #scene-svg{ width:100%; height:100%; display:block; background:var(--paper); cursor:crosshair; touch-action:none; }
+  #scene-svg.tool-select{ cursor:default; }
+  #scene-svg.tool-erase{ cursor:not-allowed; }
+  #scene-svg.pan-mode{ cursor:grab; }
+  #scene-svg.panning{ cursor:grabbing; }
+
+  .zoom-controls{
+    position:absolute; right:14px; bottom:14px; display:flex; flex-direction:column; gap:4px;
+    background:var(--panel-bg); border:1px solid var(--panel-border); padding:5px; border-radius:var(--radius);
+  }
+  .zoom-controls button{ width:34px; }
+
+  .hint-toast{
+    position:absolute; left:14px; top:14px; max-width:320px;
+    background:var(--panel-bg); border:1px solid var(--panel-border);
+    padding:8px 10px; border-radius:var(--radius); font-size:12.5px; color:var(--text-dim);
+  }
+
+  /* ---------- Side panel ---------- */
+  aside.side-panel{
+    background:var(--panel-bg); border-left:1px solid var(--panel-border);
+    padding:12px; overflow-y:auto;
+  }
+  aside.side-panel h2{ font-size:12px; text-transform:uppercase; letter-spacing:.06em; color:var(--text-dim); margin:16px 0 8px; }
+  aside.side-panel h2:first-child{ margin-top:0; }
+  .field{ margin-bottom:9px; }
+  .field label{ display:block; font-size:11.5px; color:var(--text-dim); margin-bottom:3px; }
+  .field select, .field input[type=number], .field input[type=text], .field textarea{
+    width:100%; background:var(--panel-bg-raised); border:1px solid var(--panel-border);
+    color:var(--text-light); border-radius:var(--radius); padding:6px 7px;
+  }
+  .field textarea{ min-height:56px; resize:vertical; }
+  .checkbox-row{ display:flex; align-items:center; gap:8px; margin-bottom:9px; }
+  .checkbox-row label{ font-size:12.5px; }
+  .empty-note{ font-size:12.5px; color:var(--text-dim); line-height:1.5; }
+  .prop-actions{ display:flex; gap:6px; margin-top:8px; }
+
+  details{ border:1px solid var(--panel-border); border-radius:var(--radius); padding:0; margin-bottom:10px; background:var(--panel-bg-raised); }
+  details summary{ cursor:pointer; padding:8px 10px; font-size:12.5px; font-weight:600; list-style:none; display:flex; justify-content:space-between; }
+  details summary::-webkit-details-marker{ display:none; }
+  details summary::after{ content:'+'; color:var(--text-dim); }
+  details[open] summary::after{ content:'\2212'; }
+  details .details-body{ padding:2px 10px 10px; font-size:12.5px; color:var(--text-dim); line-height:1.6; }
+  .struct-list{ list-style:none; margin:0; padding:0; max-height:220px; overflow-y:auto; }
+  .struct-list li{ padding:3px 0; border-bottom:1px dashed var(--panel-border); font-family:var(--font-mono); font-size:11.5px; }
+  .struct-list li.err{ color:var(--warn-tint); }
+  .struct-list h3{ font-size:11px; text-transform:uppercase; color:var(--text-dim); margin:8px 0 2px; }
+
+  select#style-preset, select#font-scale{ width:100%; }
+
+  /* ---------- Footer ---------- */
+  footer.statusbar{
+    display:flex; align-items:center; gap:16px; padding:6px 14px;
+    background:var(--panel-bg); border-top:1px solid var(--panel-border);
+    font-size:12px; color:var(--text-dim); font-family:var(--font-mono);
+  }
+  footer.statusbar #status-msg{ color:var(--text-light); flex:1; }
+  .warn-pill{ color:var(--warn); font-weight:600; }
+
+  ::-webkit-scrollbar{ width:10px; height:10px; }
+  ::-webkit-scrollbar-thumb{ background:var(--panel-border); border-radius:5px; }
+  ::-webkit-scrollbar-track{ background:transparent; }
+</style>
+</head>
+<body>
+<a href="#scene-svg" class="skip-link">Skip to drawing canvas</a>
+
+<div id="app">
+
+  <header class="topbar">
+    <div class="brand">
+      <h1>Bench</h1>
+      <span>molecular structure editor</span>
+    </div>
+    <input class="doc-name" id="doc-name" value="Untitled structure" aria-label="Document title" />
+    <div class="divider"></div>
+    <div class="btn-row" role="group" aria-label="Edit history">
+      <button id="btn-undo" aria-label="Undo last action">&#8630; Undo</button>
+      <button id="btn-redo" aria-label="Redo last undone action">&#8631; Redo</button>
+    </div>
+    <div class="divider"></div>
+    <div class="btn-row" role="group" aria-label="Export">
+      <button id="btn-export-svg">Download SVG</button>
+      <button id="btn-export-png">Download PNG</button>
+      <button id="btn-copy-image">Copy image</button>
+    </div>
+    <div class="divider"></div>
+    <div class="btn-row" role="group" aria-label="Document">
+      <button id="btn-new-doc">New</button>
+    </div>
+    <div class="spacer"></div>
+    <span class="save-indicator" id="save-indicator" aria-hidden="true">&nbsp;</span>
+  </header>
+
+  <div class="workspace">
+    <nav class="tools" aria-label="Drawing tools and elements">
+      <div class="tool-group">
+        <h2>Tools</h2>
+        <div class="tool-list" role="group" aria-label="Tool selection">
+          <button data-tool="select" aria-pressed="true">&#8598; Select <kbd>V</kbd></button>
+          <button data-tool="atom" aria-pressed="false">&#9679; Atom <kbd>A</kbd></button>
+          <button data-tool="bond" aria-pressed="false">&#9585; Bond <kbd>B</kbd></button>
+          <button data-tool="text" aria-pressed="false">Aa Text <kbd>T</kbd></button>
+          <button data-tool="erase" aria-pressed="false">&#10005; Erase <kbd>E</kbd></button>
+        </div>
+      </div>
+
+      <div class="tool-group">
+        <h2>Reaction arrows</h2>
+        <div class="tool-list" role="group" aria-label="Arrow tools">
+          <button data-tool="arrow-forward" aria-pressed="false">&#8594; Forward <kbd>R</kbd></button>
+          <button data-tool="arrow-eq" aria-pressed="false">&#8652; Equilibrium</button>
+          <button data-tool="arrow-res" aria-pressed="false">&#8596; Resonance</button>
+          <button data-tool="arrow-retro" aria-pressed="false">&#8658; Retrosynthetic</button>
+        </div>
+      </div>
+
+      <div class="tool-group">
+        <h2>Element (atom tool)</h2>
+        <div class="element-grid" role="group" aria-label="Element picker">
+          <button data-el="C" aria-pressed="true">C</button>
+          <button data-el="N">N</button>
+          <button data-el="O">O</button>
+          <button data-el="S">S</button>
+          <button data-el="P">P</button>
+          <button data-el="F">F</button>
+          <button data-el="Cl">Cl</button>
+          <button data-el="Br">Br</button>
+          <button data-el="I">I</button>
+          <button data-el="H">H</button>
+          <button data-el="B">B</button>
+          <button data-el="Si">Si</button>
+        </div>
+        <div class="custom-el-row">
+          <input id="custom-el" type="text" maxlength="2" placeholder="Other, e.g. Na" aria-label="Custom element symbol" />
+          <button id="custom-el-go">Use</button>
+        </div>
+      </div>
+
+      <div class="tool-group">
+        <h2>Templates</h2>
+        <div class="tool-list">
+          <button id="tpl-benzene">Insert benzene ring</button>
+          <button id="tpl-glycine">Insert glycine</button>
+        </div>
+      </div>
+    </nav>
+
+    <main class="canvas-wrap">
+      <svg id="scene-svg" tabindex="0"
+           role="application"
+           aria-roledescription="Molecular drawing canvas"
+           aria-describedby="canvas-instructions"
+           viewBox="0 0 1000 680" preserveAspectRatio="xMidYMid meet">
+        <defs>
+          <pattern id="grid-pattern" width="20" height="20" patternUnits="userSpaceOnUse">
+            <path d="M 20 0 L 0 0 0 20" fill="none" stroke="var(--grid-line)" stroke-width="1"/>
+          </pattern>
+        </defs>
+        <g id="viewport">
+          <rect id="grid-bg" x="-4000" y="-4000" width="8000" height="8000" fill="url(#grid-pattern)"></rect>
+          <g id="entities-layer"></g>
+          <g id="keyboard-cursor-layer"></g>
+        </g>
+      </svg>
+      <p id="canvas-instructions" class="sr-only">
+        Interactive drawing surface. Choose a tool from the panel on the left, then click the canvas to draw,
+        or use the keyboard: arrow keys move a keyboard cursor in grid steps, Enter performs the active tool's
+        action at the cursor, Escape cancels an in-progress bond or arrow, Delete removes the selected item.
+        Open Structure summary in the right-hand panel for a full text description of the current molecule.
+      </p>
+      <div class="hint-toast" id="hint-toast" role="note">Tool: <strong id="hint-tool-name">Select</strong> &mdash; <span id="hint-tool-desc">click an item to select and drag to move it.</span></div>
+      <div class="zoom-controls" role="group" aria-label="Zoom controls">
+        <button id="zoom-in" aria-label="Zoom in">+</button>
+        <button id="zoom-reset" aria-label="Reset zoom to fit">&#9723;</button>
+        <button id="zoom-out" aria-label="Zoom out">&minus;</button>
+      </div>
+    </main>
+
+    <aside class="side-panel" aria-label="Properties and settings">
+      <h2>Properties</h2>
+      <div id="properties-body"><p class="empty-note">Nothing selected. Choose the Select tool and click an atom, bond, arrow, or text label to edit it here.</p></div>
+
+      <details id="details-structure">
+        <summary>Structure summary <span class="sr-only">(text description of the whole molecule, updates live)</span></summary>
+        <div class="details-body" id="structure-summary"><p>No structure yet &mdash; pick the Atom or Bond tool and start drawing.</p></div>
+      </details>
+
+      <details id="details-settings">
+        <summary>Settings</summary>
+        <div class="details-body">
+          <div class="checkbox-row">
+            <input type="checkbox" id="chk-hc" />
+            <label for="chk-hc">High-contrast mode</label>
+          </div>
+          <div class="checkbox-row">
+            <input type="checkbox" id="chk-grid-snap" checked/>
+            <label for="chk-grid-snap">Snap to grid</label>
+          </div>
+          <div class="checkbox-row">
+            <input type="checkbox" id="chk-angle-snap" checked/>
+            <label for="chk-angle-snap">Snap bond angle (15&deg;)</label>
+          </div>
+          <div class="field">
+            <label for="font-scale">Interface text size</label>
+            <select id="font-scale">
+              <option value="14">Default</option>
+              <option value="16">Large</option>
+              <option value="18">Extra large</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="style-preset">Style preset</label>
+            <select id="style-preset">
+              <option value="ACS_1996">ACS 1996</option>
+              <option value="NATURE">Nature</option>
+              <option value="RSC">RSC</option>
+            </select>
+          </div>
+        </div>
+      </details>
+
+      <details id="details-help">
+        <summary>Keyboard shortcuts &amp; help</summary>
+        <div class="details-body">
+          <p><kbd>V</kbd> select &nbsp;<kbd>A</kbd> atom &nbsp;<kbd>B</kbd> bond &nbsp;<kbd>T</kbd> text &nbsp;<kbd>E</kbd> erase &nbsp;<kbd>R</kbd> arrow</p>
+          <p><kbd>C N O S P F H B</kbd> pick element while Atom tool is active</p>
+          <p><kbd>Ctrl/Cmd+Z</kbd> undo &nbsp;<kbd>Ctrl/Cmd+Shift+Z</kbd> redo</p>
+          <p><kbd>Delete</kbd> remove selection &nbsp;<kbd>Arrows</kbd> nudge selection or move keyboard cursor</p>
+          <p><kbd>Enter</kbd> perform active tool at keyboard cursor &nbsp;<kbd>Esc</kbd> cancel</p>
+          <p>Click an existing bond with the Bond tool to cycle single &rarr; double &rarr; triple &rarr; wedge &rarr; hash.</p>
+          <p>Mouse wheel zooms toward the pointer. Hold <kbd>Space</kbd> and drag, or drag with the middle mouse button, to pan.</p>
+        </div>
+      </details>
+    </aside>
+  </div>
+
+  <footer class="statusbar">
+    <span id="zoom-readout">Zoom 100%</span>
+    <span id="tool-readout">Tool: Select</span>
+    <span id="valence-readout"></span>
+    <span id="status-msg" role="status" aria-live="assertive" aria-atomic="true">Ready.</span>
+  </footer>
+</div>
+
+<script>
+(function(){
+"use strict";
+
+/* =========================================================================
+   1. CONFIGURATION
+   ========================================================================= */
+const STYLE_PRESETS = {
+  ACS_1996:  { bondLength:40, bondSpacing:0.18, bondWidth:1.6, boldWidth:5.5, hashCount:6, fontSize:15, arrowHead:11 },
+  NATURE:    { bondLength:38, bondSpacing:0.20, bondWidth:1.8, boldWidth:6.0, hashCount:6, fontSize:14, arrowHead:10 },
+  RSC:       { bondLength:42, bondSpacing:0.16, bondWidth:1.5, boldWidth:5.0, hashCount:7, fontSize:15, arrowHead:11 }
+};
+
+// Standard valence table. Entries mapped to null are treated as "no check" (metals, variable valence).
+const VALENCE = {
+  H:1, C:4, N:3, O:2, F:1, Cl:1, Br:1, I:1, S:2, P:3, B:3, Si:4, Se:2,
+  Na:1, K:1, Li:1, Mg:2, Zn:2, Cu:2, Fe:null, Pd:null, Pt:null
+};
+
+const MERGE_RADIUS = 12;      // px in world units, snapping a bond endpoint onto an existing atom
+const GRID_STEP = 20;         // world units for grid-snap & keyboard cursor steps
+const ANGLE_SNAP_RAD = Math.PI / 12; // 15 degrees
+const HISTORY_LIMIT = 120;
+const STORAGE_KEY = "scene-document";
+const SAVE_DEBOUNCE_MS = 700;
+
+/* =========================================================================
+   2. STATE
+   ========================================================================= */
+function uid(prefix){ return prefix + "_" + Math.random().toString(36).slice(2, 10); }
+
+function emptyScene(){
+  return {
+    title: "Untitled structure",
+    stylePreset: "ACS_1996",
+    atoms: {},
+    bonds: {},
+    arrows: {},
+    texts: {}
+  };
+}
+
+const state = {
+  scene: emptyScene(),
+  selection: null,        // {kind:'atom'|'bond'|'arrow'|'text', id}
+  tool: "select",
+  currentElement: "C",
+  pan: { x: 60, y: 60 },
+  zoom: 1,
+  highContrast: false,
+  gridSnap: true,
+  angleSnap: true,
+  keyboardCursor: { x: 500, y: 340 },
+  spaceHeld: false,
+  panning: false,
+  bondDraft: null,        // {startAtomId, x, y} while dragging/keying a bond or arrow
+  history: [],
+  historyIndex: -1,
+  lastErrorAtomIds: new Set()
+};
+
+function currentStyle(){ return STYLE_PRESETS[state.scene.stylePreset] || STYLE_PRESETS.ACS_1996; }
+
+/* =========================================================================
+   3. GEOMETRY HELPERS
+   ========================================================================= */
+function dist(a, b){ return Math.hypot(a.x - b.x, a.y - b.y); }
+
+function snapToGrid(p){
+  if(!state.gridSnap) return p;
+  return { x: Math.round(p.x / GRID_STEP) * GRID_STEP, y: Math.round(p.y / GRID_STEP) * GRID_STEP };
+}
+
+function snapAngleTo(start, current, length){
+  if(!state.angleSnap) return current;
+  const dx = current.x - start.x, dy = current.y - start.y;
+  const angle = Math.atan2(dy, dx);
+  const snapped = Math.round(angle / ANGLE_SNAP_RAD) * ANGLE_SNAP_RAD;
+  const len = length != null ? length : Math.hypot(dx, dy);
+  return { x: start.x + len * Math.cos(snapped), y: start.y + len * Math.sin(snapped) };
+}
+
+function perpendicular(dx, dy){
+  const len = Math.hypot(dx, dy) || 1;
+  return { x: -dy / len, y: dx / len };
+}
+
+// Approximate a labeled atom's text bounding box in world units, for bond clipping.
+function atomLabelBox(atom){
+  const label = atomLabelText(atom);
+  if(!label) return null;
+  const fs = currentStyle().fontSize;
+  const w = Math.max(label.length * fs * 0.62, fs * 0.9);
+  const h = fs * 1.15;
+  return { x: atom.x - w/2, y: atom.y - h/2, width: w, height: h };
+}
+
+// Shorten a segment p1->p2 so it stops at the edge of targetBox (expanded by margin).
+function clipSegmentToBox(p1, p2, box, margin){
+  if(!box) return p2;
+  const minX = box.x - margin, maxX = box.x + box.width + margin;
+  const minY = box.y - margin, maxY = box.y + box.height + margin;
+  const dx = p1.x - p2.x, dy = p1.y - p2.y;
+  if(Math.abs(dx) < 1e-6 && Math.abs(dy) < 1e-6) return p2;
+  const ts = [];
+  if(Math.abs(dx) > 1e-6){
+    const tL = (minX - p2.x) / dx, yL = p2.y + tL * dy;
+    if(tL >= 0 && tL <= 1 && yL >= minY && yL <= maxY) ts.push(tL);
+    const tR = (maxX - p2.x) / dx, yR = p2.y + tR * dy;
+    if(tR >= 0 && tR <= 1 && yR >= minY && yR <= maxY) ts.push(tR);
+  }
+  if(Math.abs(dy) > 1e-6){
+    const tT = (minY - p2.y) / dy, xT = p2.x + tT * dx;
+    if(tT >= 0 && tT <= 1 && xT >= minX && xT <= maxX) ts.push(tT);
+    const tB = (maxY - p2.y) / dy, xB = p2.x + tB * dx;
+    if(tB >= 0 && tB <= 1 && xB >= minX && xB <= maxX) ts.push(tB);
+  }
+  if(ts.length === 0) return p2;
+  const minT = Math.min(...ts);
+  return { x: p2.x + minT * dx, y: p2.y + minT * dy };
+}
+
+/* =========================================================================
+   4. CHEMISTRY HELPERS
+   ========================================================================= */
+function bondsOfAtom(atomId){
+  return Object.values(state.scene.bonds).filter(b => b.a1 === atomId || b.a2 === atomId);
+}
+
+function atomLabelText(atom){
+  // Skeletal convention: unlabeled plain-carbon vertices render as just a line joint.
+  if(atom.element === "C" && atom.charge === 0 && !atom.isotope) return null;
+  return atom.element;
+}
+
+function atomValenceInfo(atom){
+  const base = VALENCE[atom.element];
+  const bonds = bondsOfAtom(atom.id);
+  const bondOrderSum = bonds.reduce((s, b) => s + (b.order || 1), 0);
+  if(base == null) return { checked:false, implicitH:0, overfilled:false };
+  const effective = base - atom.charge;
+  const implicitH = effective - bondOrderSum;
+  return { checked:true, implicitH: Math.max(0, implicitH), overfilled: implicitH < 0, bondOrderSum, effective };
+}
+
+function chargeSuperscript(charge){
+  if(!charge) return "";
+  const n = Math.abs(charge);
+  const sign = charge > 0 ? "+" : "\u2212";
+  return (n > 1 ? String(n) : "") + sign;
+}
+
+/* =========================================================================
+   5. UNDO / REDO
+   ========================================================================= */
+function snapshot(){ return JSON.stringify(state.scene); }
+
+function pushHistory(){
+  const snap = snapshot();
+  if(state.historyIndex >= 0 && state.history[state.historyIndex] === snap) return;
+  state.history = state.history.slice(0, state.historyIndex + 1);
+  state.history.push(snap);
+  if(state.history.length > HISTORY_LIMIT) state.history.shift();
+  state.historyIndex = state.history.length - 1;
+  updateHistoryButtons();
+  scheduleSave();
+}
+
+function undo(){
+  if(state.historyIndex <= 0){ announce("Nothing to undo."); return; }
+  state.historyIndex--;
+  state.scene = JSON.parse(state.history[state.historyIndex]);
+  state.selection = null;
+  renderAll();
+  announce("Undid last action.");
+  updateHistoryButtons();
+  scheduleSave();
+}
+
+function redo(){
+  if(state.historyIndex >= state.history.length - 1){ announce("Nothing to redo."); return; }
+  state.historyIndex++;
+  state.scene = JSON.parse(state.history[state.historyIndex]);
+  state.selection = null;
+  renderAll();
+  announce("Redid action.");
+  updateHistoryButtons();
+  scheduleSave();
+}
+
+function updateHistoryButtons(){
+  $("#btn-undo").disabled = state.historyIndex <= 0;
+  $("#btn-redo").disabled = state.historyIndex >= state.history.length - 1;
+}
+
+/* =========================================================================
+   6. PERSISTENCE
+   ========================================================================= */
+let saveTimer = null;
+function scheduleSave(){
+  clearTimeout(saveTimer);
+  setSaveIndicator("Saving\u2026");
+  saveTimer = setTimeout(doSave, SAVE_DEBOUNCE_MS);
+}
+async function doSave(){
+  try{
+    if(!window.storage){ setSaveIndicator(""); return; }
+    await window.storage.set(STORAGE_KEY, JSON.stringify(state.scene), false);
+    setSaveIndicator("Saved " + new Date().toLocaleTimeString());
+  }catch(err){
+    console.warn("Storage error", err);
+    setSaveIndicator("Not saved (storage unavailable)");
+  }
+}
+function setSaveIndicator(text){ $("#save-indicator").textContent = text; }
+
+async function loadOnStart(){
+  try{
+    if(!window.storage) return false;
+    const res = await window.storage.get(STORAGE_KEY, false);
+    if(res && res.value){
+      const parsed = JSON.parse(res.value);
+      if(parsed && parsed.atoms) { state.scene = Object.assign(emptyScene(), parsed); return true; }
+    }
+  }catch(err){
+    // Key not found or storage unavailable; start fresh.
+  }
+  return false;
+}
+
+/* =========================================================================
+   7. SCENE MUTATIONS (used by both pointer and keyboard input paths)
+   ========================================================================= */
+function addAtom(pos, element){
+  const p = snapToGrid(pos);
+  const id = uid("atom");
+  state.scene.atoms[id] = { id, element: element, x: p.x, y: p.y, charge: 0, isotope: null };
+  return id;
+}
+
+function findAtomNear(pos, radius){
+  radius = radius || MERGE_RADIUS;
+  let best = null, bestD = radius;
+  for(const atom of Object.values(state.scene.atoms)){
+    const d = dist(atom, pos);
+    if(d <= bestD){ best = atom; bestD = d; }
+  }
+  return best;
+}
+
+function findBondNear(pos, radius){
+  radius = radius || 8;
+  let best = null, bestD = radius;
+  for(const bond of Object.values(state.scene.bonds)){
+    const a1 = state.scene.atoms[bond.a1], a2 = state.scene.atoms[bond.a2];
+    if(!a1 || !a2) continue;
+    const d = pointToSegmentDistance(pos, a1, a2);
+    if(d <= bestD){ best = bond; bestD = d; }
+  }
+  return best;
+}
+
+function pointToSegmentDistance(p, a, b){
+  const dx = b.x - a.x, dy = b.y - a.y;
+  const len2 = dx*dx + dy*dy;
+  if(len2 === 0) return dist(p, a);
+  let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2;
+  t = Math.max(0, Math.min(1, t));
+  const proj = { x: a.x + t * dx, y: a.y + t * dy };
+  return dist(p, proj);
+}
+
+function findEntityNear(pos){
+  const atom = findAtomNear(pos);
+  if(atom) return { kind:"atom", id: atom.id };
+  const bond = findBondNear(pos);
+  if(bond) return { kind:"bond", id: bond.id };
+  for(const arrow of Object.values(state.scene.arrows)){
+    const d = pointToSegmentDistance(pos, {x:arrow.x1,y:arrow.y1}, {x:arrow.x2,y:arrow.y2});
+    if(d <= 10) return { kind:"arrow", id: arrow.id };
+  }
+  for(const t of Object.values(state.scene.texts)){
+    const w = Math.max(t.text.length * t.fontSizePt * 0.6, 20), h = t.fontSizePt * 1.3;
+    if(pos.x >= t.x - w/2 && pos.x <= t.x + w/2 && pos.y >= t.y - h/2 && pos.y <= t.y + h/2) return { kind:"text", id: t.id };
+  }
+  return null;
+}
+
+const BOND_CYCLE = [
+  { order:1, stereo:"NONE" },
+  { order:2, stereo:"NONE" },
+  { order:3, stereo:"NONE" },
+  { order:1, stereo:"WEDGE" },
+  { order:1, stereo:"HASH" }
+];
+function cycleBond(bond){
+  const idx = BOND_CYCLE.findIndex(c => c.order === bond.order && c.stereo === bond.stereo);
+  const next = BOND_CYCLE[(idx + 1) % BOND_CYCLE.length];
+  bond.order = next.order; bond.stereo = next.stereo;
+}
+
+function createOrCycleBond(atomId1, atomId2){
+  if(atomId1 === atomId2) return null;
+  const existing = Object.values(state.scene.bonds).find(b =>
+    (b.a1 === atomId1 && b.a2 === atomId2) || (b.a1 === atomId2 && b.a2 === atomId1));
+  if(existing){ cycleBond(existing); return existing.id; }
+  const id = uid("bond");
+  state.scene.bonds[id] = { id, a1: atomId1, a2: atomId2, order: 1, stereo: "NONE" };
+  return id;
+}
+
+function deleteEntity(kind, id){
+  if(kind === "atom"){
+    delete state.scene.atoms[id];
+    Object.values(state.scene.bonds).forEach(b => { if(b.a1 === id || b.a2 === id) delete state.scene.bonds[b.id]; });
+  } else if(kind === "bond") delete state.scene.bonds[id];
+  else if(kind === "arrow") delete state.scene.arrows[id];
+  else if(kind === "text") delete state.scene.texts[id];
+}
+
+/* =========================================================================
+   8. RENDERING
+   ========================================================================= */
+const svg = document.getElementById("scene-svg");
+const viewport = document.getElementById("viewport");
+const entitiesLayer = document.getElementById("entities-layer");
+const cursorLayer = document.getElementById("keyboard-cursor-layer");
+const NS = "http://www.w3.org/2000/svg";
+
+function el(tag, attrs, children){
+  const n = document.createElementNS(NS, tag);
+  for(const k in (attrs||{})) if(attrs[k] != null) n.setAttribute(k, attrs[k]);
+  (children||[]).forEach(c => n.appendChild(c));
+  return n;
+}
+
+function applyViewportTransform(){
+  viewport.setAttribute("transform", `translate(${state.pan.x} ${state.pan.y}) scale(${state.zoom})`);
+}
+
+function renderAll(){
+  renderEntities();
+  renderKeyboardCursor();
+  renderProperties();
+  renderStructureSummary();
+  applyViewportTransform();
+  updateValenceReadout();
+  updateHistoryButtons();
+}
+
+function bondEndpoints(bond){
+  const a1 = state.scene.atoms[bond.a1], a2 = state.scene.atoms[bond.a2];
+  if(!a1 || !a2) return null;
+  let p1 = clipSegmentToBox(a2, a1, atomLabelBox(a1), 3);
+  let p2 = clipSegmentToBox(a1, a2, atomLabelBox(a2), 3);
+  return { p1, p2, a1, a2 };
+}
+
+function renderEntities(){
+  entitiesLayer.innerHTML = "";
+  const style = currentStyle();
+  const spacing = style.bondLength * style.bondSpacing;
+
+  // Bonds first (so atom labels paint over the line ends)
+  Object.values(state.scene.bonds).forEach(bond => {
+    const ends = bondEndpoints(bond);
+    if(!ends) return;
+    const { p1, p2 } = ends;
+    const g = el("g", { "data-kind":"bond", "data-id": bond.id, tabindex:"-1" });
+    const isSel = state.selection && state.selection.kind === "bond" && state.selection.id === bond.id;
+    const stroke = isSel ? "var(--accent)" : "var(--ink)";
+    const sw = style.bondWidth * (isSel ? 1.4 : 1);
+
+    if(bond.stereo === "WEDGE"){
+      const perp = perpendicular(p2.x - p1.x, p2.y - p1.y);
+      const halfW = style.boldWidth / 2;
+      const poly = el("polygon", {
+        points: `${p1.x},${p1.y} ${p2.x + perp.x*halfW},${p2.y + perp.y*halfW} ${p2.x - perp.x*halfW},${p2.y - perp.y*halfW}`,
+        fill: stroke
+      });
+      g.appendChild(poly);
+    } else if(bond.stereo === "HASH"){
+      const n = style.hashCount;
+      const perp = perpendicular(p2.x - p1.x, p2.y - p1.y);
+      for(let i=1;i<=n;i++){
+        const t = i / n;
+        const cx = p1.x + (p2.x - p1.x) * t, cy = p1.y + (p2.y - p1.y) * t;
+        const w = (style.boldWidth/2) * t;
+        g.appendChild(el("line", { x1:cx-perp.x*w, y1:cy-perp.y*w, x2:cx+perp.x*w, y2:cy+perp.y*w, stroke, "stroke-width": style.bondWidth*0.9 }));
+      }
+    } else {
+      const lines = bond.order === 1 ? [0] : bond.order === 2 ? [-spacing/2, spacing/2] : [-spacing, 0, spacing];
+      const perp = perpendicular(p2.x - p1.x, p2.y - p1.y);
+      const trim = bond.order > 1 ? 0.14 : 0;
+      lines.forEach(off => {
+        const ox = perp.x * off, oy = perp.y * off;
+        const tx = (p2.x - p1.x) * trim, ty = (p2.y - p1.y) * trim;
+        const lx1 = p1.x + ox + (off !== 0 ? tx : 0), ly1 = p1.y + oy + (off !== 0 ? ty : 0);
+        const lx2 = p2.x + ox - (off !== 0 ? tx : 0), ly2 = p2.y + oy - (off !== 0 ? ty : 0);
+        g.appendChild(el("line", { x1:lx1, y1:ly1, x2:lx2, y2:ly2, stroke, "stroke-width": sw, "stroke-linecap":"round" }));
+      });
+    }
+    // wide invisible hit area for easier clicking/erasing
+    g.appendChild(el("line", { x1:p1.x, y1:p1.y, x2:p2.x, y2:p2.y, stroke:"transparent", "stroke-width": 14 }));
+    entitiesLayer.appendChild(g);
+  });
+
+  // Atoms
+  Object.values(state.scene.atoms).forEach(atom => {
+    const g = el("g", { "data-kind":"atom", "data-id": atom.id });
+    const isSel = state.selection && state.selection.kind === "atom" && state.selection.id === atom.id;
+    const valence = atomValenceInfo(atom);
+    const label = atomLabelText(atom);
+
+    if(valence.overfilled){
+      g.appendChild(el("circle", { cx:atom.x, cy:atom.y, r:14, fill:"none", stroke:"var(--warn)", "stroke-width":2.5 }));
+    }
+    if(isSel){
+      g.appendChild(el("circle", { cx:atom.x, cy:atom.y, r:11, fill:"var(--accent-tint)", opacity:0.55 }));
+    }
+    if(label){
+      let text = label;
+      if(valence.checked && valence.implicitH > 0) text += "H" + (valence.implicitH > 1 ? subDigits(valence.implicitH) : "");
+      text += chargeSuperscript(atom.charge);
+      const t = el("text", {
+        x:atom.x, y:atom.y, "text-anchor":"middle", "dominant-baseline":"central",
+        "font-family":"var(--font-mono)", "font-size": style.fontSize, fill:"var(--ink)", "font-weight":600
+      });
+      t.textContent = text;
+      // background chip so bonds don't visually collide with text
+      const w = Math.max(text.length * style.fontSize * 0.62, style.fontSize*0.9);
+      g.appendChild(el("rect", { x:atom.x-w/2, y:atom.y-style.fontSize*0.62, width:w, height:style.fontSize*1.2, fill:"var(--paper)" }));
+      g.appendChild(t);
+    } else {
+      // invisible hit target for plain vertex atoms
+      g.appendChild(el("circle", { cx:atom.x, cy:atom.y, r:9, fill: isSel ? "none" : "transparent" }));
+    }
+    entitiesLayer.appendChild(g);
+  });
+
+  // Reaction arrows
+  Object.values(state.scene.arrows).forEach(arrow => renderArrow(arrow, style));
+
+  // Text annotations
+  Object.values(state.scene.texts).forEach(t => {
+    const isSel = state.selection && state.selection.kind === "text" && state.selection.id === t.id;
+    const g = el("g", { "data-kind":"text", "data-id": t.id });
+    if(isSel) g.appendChild(el("rect", { x:t.x-4, y:t.y-t.fontSizePt, width: Math.max(t.text.length*t.fontSizePt*0.55,20)+8, height:t.fontSizePt*1.4, fill:"var(--accent-tint)", opacity:.5 }));
+    const el2 = el("text", { x:t.x, y:t.y, "font-family":"var(--font-sans)", "font-size":t.fontSizePt, "font-weight": t.isBold ? 700 : 400, fill:"var(--ink)" });
+    el2.textContent = t.text;
+    g.appendChild(el2);
+    entitiesLayer.appendChild(g);
+  });
+
+  // In-progress bond/arrow draft preview
+  if(state.bondDraft){
+    const from = state.scene.atoms[state.bondDraft.startAtomId] || state.bondDraft.startPoint;
+    entitiesLayer.appendChild(el("line", {
+      x1: from.x, y1: from.y, x2: state.bondDraft.x, y2: state.bondDraft.y,
+      stroke:"var(--accent)", "stroke-width":2, "stroke-dasharray":"5 4"
+    }));
+  }
+}
+
+function subDigits(n){
+  const map = {"0":"\u2080","1":"\u2081","2":"\u2082","3":"\u2083","4":"\u2084","5":"\u2085","6":"\u2086","7":"\u2087","8":"\u2088","9":"\u2089"};
+  return String(n).split("").map(d => map[d] || d).join("");
+}
+
+function renderArrow(arrow, style){
+  const isSel = state.selection && state.selection.kind === "arrow" && state.selection.id === arrow.id;
+  const stroke = isSel ? "var(--accent)" : "var(--ink)";
+  const g = el("g", { "data-kind":"arrow", "data-id": arrow.id });
+  const dx = arrow.x2 - arrow.x1, dy = arrow.y2 - arrow.y1;
+  const angle = Math.atan2(dy, dx);
+  const head = style.arrowHead;
+
+  function arrowHead(tipX, tipY, dirAngle){
+    const a1 = dirAngle + Math.PI - 0.45, a2 = dirAngle + Math.PI + 0.45;
+    return el("polygon", { points:
+      `${tipX},${tipY} ${tipX+head*Math.cos(a1)},${tipY+head*Math.sin(a1)} ${tipX+head*Math.cos(a2)},${tipY+head*Math.sin(a2)}`,
+      fill: stroke });
+  }
+
+  if(arrow.arrowType === "EQUILIBRIUM"){
+    const perp = perpendicular(dx, dy);
+    const off = 4;
+    g.appendChild(el("line", { x1:arrow.x1+perp.x*off, y1:arrow.y1+perp.y*off, x2:arrow.x2+perp.x*off, y2:arrow.y2+perp.y*off, stroke, "stroke-width":1.6 }));
+    g.appendChild(arrowHead(arrow.x2+perp.x*off, arrow.y2+perp.y*off, angle));
+    g.appendChild(el("line", { x1:arrow.x2-perp.x*off, y1:arrow.y2-perp.y*off, x2:arrow.x1-perp.x*off, y2:arrow.y1-perp.y*off, stroke, "stroke-width":1.6 }));
+    g.appendChild(arrowHead(arrow.x1-perp.x*off, arrow.y1-perp.y*off, angle+Math.PI));
+  } else if(arrow.arrowType === "RESONANCE"){
+    g.appendChild(el("line", { x1:arrow.x1, y1:arrow.y1, x2:arrow.x2, y2:arrow.y2, stroke, "stroke-width":1.6 }));
+    g.appendChild(arrowHead(arrow.x2, arrow.y2, angle));
+    g.appendChild(arrowHead(arrow.x1, arrow.y1, angle+Math.PI));
+  } else if(arrow.arrowType === "RETROSYNTHETIC"){
+    const perp = perpendicular(dx, dy);
+    const off = 2.5;
+    [off, -off].forEach(o => g.appendChild(el("line", { x1:arrow.x1+perp.x*o, y1:arrow.y1+perp.y*o, x2:arrow.x2+perp.x*o, y2:arrow.y2+perp.y*o, stroke, "stroke-width":1.4 })));
+    g.appendChild(arrowHead(arrow.x2, arrow.y2, angle));
+  } else {
+    g.appendChild(el("line", { x1:arrow.x1, y1:arrow.y1, x2:arrow.x2, y2:arrow.y2, stroke, "stroke-width":1.6 }));
+    g.appendChild(arrowHead(arrow.x2, arrow.y2, angle));
+  }
+
+  const midX = (arrow.x1+arrow.x2)/2, midY = (arrow.y1+arrow.y2)/2;
+  if(arrow.conditionsTop) g.appendChild(textEl(midX, midY - 12, arrow.conditionsTop, 11));
+  if(arrow.conditionsBottom) g.appendChild(textEl(midX, midY + 16, arrow.conditionsBottom, 11));
+  g.appendChild(el("line", { x1:arrow.x1, y1:arrow.y1, x2:arrow.x2, y2:arrow.y2, stroke:"transparent", "stroke-width":14 }));
+  entitiesLayer.appendChild(g);
+}
+
+function textEl(x, y, content, size){
+  const t = el("text", { x, y, "text-anchor":"middle", "font-family":"var(--font-sans)", "font-size":size, fill:"var(--ink)" });
+  t.textContent = content;
+  return t;
+}
+
+function renderKeyboardCursor(){
+  cursorLayer.innerHTML = "";
+  if(document.activeElement !== svg) return;
+  const c = state.keyboardCursor;
+  cursorLayer.appendChild(el("circle", { cx:c.x, cy:c.y, r:9, fill:"none", stroke:"var(--focus)", "stroke-width":2, "stroke-dasharray":"3 3" }));
+  cursorLayer.appendChild(el("line", { x1:c.x-14, y1:c.y, x2:c.x+14, y2:c.y, stroke:"var(--focus)", "stroke-width":1 }));
+  cursorLayer.appendChild(el("line", { x1:c.x, y1:c.y-14, x2:c.x, y2:c.y+14, stroke:"var(--focus)", "stroke-width":1 }));
+}
+
+/* =========================================================================
+   9. PROPERTIES PANEL
+   ========================================================================= */
+function $(sel){ return document.querySelector(sel); }
+
+function renderProperties(){
+  const body = $("#properties-body");
+  body.innerHTML = "";
+  if(!state.selection){
+    body.innerHTML = '<p class="empty-note">Nothing selected. Choose the Select tool and click an atom, bond, arrow, or text label to edit it here.</p>';
+    return;
+  }
+  const { kind, id } = state.selection;
+  if(kind === "atom") renderAtomProps(body, state.scene.atoms[id]);
+  else if(kind === "bond") renderBondProps(body, state.scene.bonds[id]);
+  else if(kind === "arrow") renderArrowProps(body, state.scene.arrows[id]);
+  else if(kind === "text") renderTextProps(body, state.scene.texts[id]);
+}
+
+function field(labelText, inputEl){
+  const wrap = document.createElement("div"); wrap.className = "field";
+  const label = document.createElement("label"); label.textContent = labelText;
+  const rid = uid("f"); label.setAttribute("for", rid); inputEl.id = rid;
+  wrap.appendChild(label); wrap.appendChild(inputEl);
+  return wrap;
+}
+
+function deleteButton(kind, id){
+  const btn = document.createElement("button");
+  btn.textContent = "Delete";
+  btn.addEventListener("click", () => {
+    deleteEntity(kind, id);
+    state.selection = null;
+    pushHistory();
+    renderAll();
+    announce("Deleted " + kind + ".");
+  });
+  return btn;
+}
+
+function renderAtomProps(body, atom){
+  if(!atom) return;
+  const elSel = document.createElement("select");
+  Object.keys(VALENCE).forEach(sym => {
+    const o = document.createElement("option"); o.value = sym; o.textContent = sym;
+    if(sym === atom.element) o.selected = true;
+    elSel.appendChild(o);
+  });
+  elSel.addEventListener("change", () => { atom.element = elSel.value; pushHistory(); renderAll(); announce("Element set to " + atom.element + "."); });
+  body.appendChild(field("Element", elSel));
+
+  const chargeInput = document.createElement("input");
+  chargeInput.type = "number"; chargeInput.min = "-3"; chargeInput.max = "3"; chargeInput.value = atom.charge;
+  chargeInput.addEventListener("change", () => { atom.charge = parseInt(chargeInput.value || "0", 10); pushHistory(); renderAll(); });
+  body.appendChild(field("Formal charge", chargeInput));
+
+  const isoInput = document.createElement("input");
+  isoInput.type = "number"; isoInput.placeholder = "e.g. 13"; isoInput.value = atom.isotope || "";
+  isoInput.addEventListener("change", () => { atom.isotope = isoInput.value ? parseInt(isoInput.value,10) : null; pushHistory(); renderAll(); });
+  body.appendChild(field("Isotope mass (optional)", isoInput));
+
+  const valence = atomValenceInfo(atom);
+  const info = document.createElement("p"); info.className = "empty-note";
+  info.textContent = valence.checked
+    ? `${bondsOfAtom(atom.id).length} bond(s), ${valence.implicitH} implicit H` + (valence.overfilled ? " \u2014 valence exceeded" : "")
+    : "Valence not checked for this element.";
+  if(valence.overfilled) info.style.color = "var(--warn-tint)";
+  body.appendChild(info);
+
+  const actions = document.createElement("div"); actions.className = "prop-actions";
+  actions.appendChild(deleteButton("atom", atom.id));
+  body.appendChild(actions);
+}
+
+function renderBondProps(body, bond){
+  if(!bond) return;
+  const orderSel = document.createElement("select");
+  [["1","Single"],["2","Double"],["3","Triple"]].forEach(([v,l]) => {
+    const o = document.createElement("option"); o.value = v; o.textContent = l;
+    if(String(bond.order) === v && bond.stereo === "NONE") o.selected = true;
+    orderSel.appendChild(o);
+  });
+  orderSel.addEventListener("change", () => { bond.order = parseInt(orderSel.value,10); bond.stereo = "NONE"; pushHistory(); renderAll(); });
+  body.appendChild(field("Bond order", orderSel));
+
+  const stereoSel = document.createElement("select");
+  [["NONE","None (flat)"],["WEDGE","Wedge (toward viewer)"],["HASH","Hash (away from viewer)"]].forEach(([v,l]) => {
+    const o = document.createElement("option"); o.value=v; o.textContent=l; if(bond.stereo===v) o.selected = true;
+    stereoSel.appendChild(o);
+  });
+  stereoSel.addEventListener("change", () => { bond.stereo = stereoSel.value; if(stereoSel.value !== "NONE") bond.order = 1; pushHistory(); renderAll(); });
+  body.appendChild(field("Stereo", stereoSel));
+
+  const swapBtn = document.createElement("button");
+  swapBtn.textContent = "Swap direction";
+  swapBtn.title = "Flips which atom the wedge/hash narrow end points from";
+  swapBtn.addEventListener("click", () => { const t = bond.a1; bond.a1 = bond.a2; bond.a2 = t; pushHistory(); renderAll(); });
+  body.appendChild(field("Direction", swapBtn));
+
+  const actions = document.createElement("div"); actions.className = "prop-actions";
+  actions.appendChild(deleteButton("bond", bond.id));
+  body.appendChild(actions);
+}
+
+function renderArrowProps(body, arrow){
+  if(!arrow) return;
+  const typeSel = document.createElement("select");
+  [["SYNTHETIC_FORWARD","Forward"],["EQUILIBRIUM","Equilibrium"],["RESONANCE","Resonance"],["RETROSYNTHETIC","Retrosynthetic"]].forEach(([v,l])=>{
+    const o = document.createElement("option"); o.value=v; o.textContent=l; if(arrow.arrowType===v) o.selected=true;
+    typeSel.appendChild(o);
+  });
+  typeSel.addEventListener("change", () => { arrow.arrowType = typeSel.value; pushHistory(); renderAll(); });
+  body.appendChild(field("Arrow type", typeSel));
+
+  const top = document.createElement("input"); top.type="text"; top.value = arrow.conditionsTop || "";
+  top.addEventListener("change", () => { arrow.conditionsTop = top.value; pushHistory(); renderAll(); });
+  body.appendChild(field("Conditions (above)", top));
+
+  const bottom = document.createElement("input"); bottom.type="text"; bottom.value = arrow.conditionsBottom || "";
+  bottom.addEventListener("change", () => { arrow.conditionsBottom = bottom.value; pushHistory(); renderAll(); });
+  body.appendChild(field("Conditions (below)", bottom));
+
+  const actions = document.createElement("div"); actions.className = "prop-actions";
+  actions.appendChild(deleteButton("arrow", arrow.id));
+  body.appendChild(actions);
+}
+
+function renderTextProps(body, t){
+  if(!t) return;
+  const ta = document.createElement("textarea"); ta.value = t.text;
+  ta.addEventListener("input", () => { t.text = ta.value; renderEntities(); renderStructureSummary(); });
+  ta.addEventListener("change", () => pushHistory());
+  body.appendChild(field("Text", ta));
+  setTimeout(() => ta.focus(), 0);
+
+  const size = document.createElement("input"); size.type="number"; size.min="8"; size.max="48"; size.value = t.fontSizePt;
+  size.addEventListener("change", () => { t.fontSizePt = parseInt(size.value,10)||14; pushHistory(); renderAll(); });
+  body.appendChild(field("Font size (pt)", size));
+
+  const boldRow = document.createElement("div"); boldRow.className = "checkbox-row";
+  const boldChk = document.createElement("input"); boldChk.type="checkbox"; boldChk.checked = !!t.isBold;
+  boldChk.addEventListener("change", () => { t.isBold = boldChk.checked; pushHistory(); renderAll(); });
+  const boldLabel = document.createElement("label"); boldLabel.textContent = "Bold";
+  boldRow.appendChild(boldChk); boldRow.appendChild(boldLabel);
+  body.appendChild(boldRow);
+
+  const actions = document.createElement("div"); actions.className = "prop-actions";
+  actions.appendChild(deleteButton("text", t.id));
+  body.appendChild(actions);
+}
+
+/* =========================================================================
+   10. STRUCTURE SUMMARY (text alternative for the whole scene)
+   ========================================================================= */
+function renderStructureSummary(){
+  const box = $("#structure-summary");
+  const atoms = Object.values(state.scene.atoms);
+  const bonds = Object.values(state.scene.bonds);
+  const arrows = Object.values(state.scene.arrows);
+  const texts = Object.values(state.scene.texts);
+  if(atoms.length === 0 && arrows.length === 0 && texts.length === 0){
+    box.innerHTML = "<p>No structure yet &mdash; pick the Atom or Bond tool and start drawing.</p>";
+    return;
+  }
+  const atomIndex = {}; atoms.forEach((a,i) => atomIndex[a.id] = i+1);
+  let html = "";
+  if(atoms.length){
+    html += "<h3>Atoms (" + atoms.length + ")</h3><ul class='struct-list'>";
+    atoms.forEach((a,i) => {
+      const v = atomValenceInfo(a);
+      const bits = [a.element];
+      if(a.charge) bits.push((a.charge>0?"+":"") + a.charge + " charge");
+      if(v.checked) bits.push(v.implicitH + " implicit H");
+      if(v.overfilled) bits.push("VALENCE EXCEEDED");
+      html += `<li class="${v.overfilled?'err':''}">${i+1}. ${bits.join(", ")} at (${Math.round(a.x)}, ${Math.round(a.y)})</li>`;
+    });
+    html += "</ul>";
+  }
+  if(bonds.length){
+    html += "<h3>Bonds (" + bonds.length + ")</h3><ul class='struct-list'>";
+    const orderName = {1:"single",2:"double",3:"triple"};
+    bonds.forEach((b,i) => {
+      const style = b.stereo !== "NONE" ? b.stereo.toLowerCase() : orderName[b.order];
+      html += `<li>${i+1}. Atom ${atomIndex[b.a1]||'?'} \u2013 Atom ${atomIndex[b.a2]||'?'}, ${style}</li>`;
+    });
+    html += "</ul>";
+  }
+  if(arrows.length){
+    html += "<h3>Reaction arrows (" + arrows.length + ")</h3><ul class='struct-list'>";
+    arrows.forEach((a,i) => {
+      html += `<li>${i+1}. ${a.arrowType.replace('_',' ').toLowerCase()}${a.conditionsTop?" \u2014 "+a.conditionsTop:""}</li>`;
+    });
+    html += "</ul>";
+  }
+  if(texts.length){
+    html += "<h3>Text labels (" + texts.length + ")</h3><ul class='struct-list'>";
+    texts.forEach((t,i) => { html += `<li>${i+1}. "${t.text}"</li>`; });
+    html += "</ul>";
+  }
+  box.innerHTML = html;
+}
+
+function updateValenceReadout(){
+  const bad = Object.values(state.scene.atoms).filter(a => atomValenceInfo(a).overfilled);
+  const readout = $("#valence-readout");
+  if(bad.length){
+    readout.innerHTML = `<span class="warn-pill">\u26A0 ${bad.length} valence issue${bad.length>1?'s':''}</span>`;
+  } else {
+    readout.textContent = "";
+  }
+  const newErrIds = new Set(bad.map(a=>a.id));
+  const newlyBad = [...newErrIds].filter(id => !state.lastErrorAtomIds.has(id));
+  if(newlyBad.length) announce(newlyBad.length + " atom(s) now exceed standard valence.");
+  state.lastErrorAtomIds = newErrIds;
+}
+
+/* =========================================================================
+   11. ANNOUNCER / STATUS
+   ========================================================================= */
+function announce(msg){
+  const node = $("#status-msg");
+  node.textContent = msg;
+}
+
+/* =========================================================================
+   12. COORDINATE CONVERSION
+   ========================================================================= */
+function toSvgLocal(clientX, clientY){
+  const pt = svg.createSVGPoint(); pt.x = clientX; pt.y = clientY;
+  const ctm = svg.getScreenCTM();
+  if(!ctm) return {x:0,y:0};
+  const p = pt.matrixTransform(ctm.inverse());
+  return { x:p.x, y:p.y };
+}
+function toWorld(clientX, clientY){
+  const pt = svg.createSVGPoint(); pt.x = clientX; pt.y = clientY;
+  const ctm = viewport.getScreenCTM();
+  if(!ctm) return {x:0,y:0};
+  const p = pt.matrixTransform(ctm.inverse());
+  return { x:p.x, y:p.y };
+}
+
+/* =========================================================================
+   13. ZOOM / PAN
+   ========================================================================= */
+function setZoomReadout(){ $("#zoom-readout").textContent = "Zoom " + Math.round(state.zoom*100) + "%"; }
+
+function zoomAt(clientX, clientY, factor){
+  const before = toWorld(clientX, clientY);
+  state.zoom = Math.max(0.2, Math.min(5, state.zoom * factor));
+  const svgLocal = toSvgLocal(clientX, clientY);
+  state.pan.x = svgLocal.x - before.x * state.zoom;
+  state.pan.y = svgLocal.y - before.y * state.zoom;
+  applyViewportTransform();
+  setZoomReadout();
+}
+
+function resetZoom(){
+  state.zoom = 1; state.pan = { x:60, y:60 };
+  applyViewportTransform(); setZoomReadout();
+  announce("Zoom reset.");
+}
+
+/* =========================================================================
+   14. TOOL / UI STATE
+   ========================================================================= */
+const TOOL_DESCRIPTIONS = {
+  select: "click an item to select and drag to move it.",
+  atom: "click the canvas to place an atom of the selected element.",
+  bond: "drag from an atom to draw a bond; click an existing bond to cycle its type.",
+  text: "click the canvas to add a text label.",
+  erase: "click any item to remove it.",
+  "arrow-forward": "drag to draw a forward reaction arrow.",
+  "arrow-eq": "drag to draw an equilibrium arrow.",
+  "arrow-res": "drag to draw a resonance arrow.",
+  "arrow-retro": "drag to draw a retrosynthetic arrow."
+};
+const TOOL_LABELS = {
+  select:"Select", atom:"Atom", bond:"Bond", text:"Text", erase:"Erase",
+  "arrow-forward":"Forward arrow", "arrow-eq":"Equilibrium arrow", "arrow-res":"Resonance arrow", "arrow-retro":"Retrosynthetic arrow"
+};
+
+function setTool(tool){
+  state.tool = tool;
+  state.bondDraft = null;
+  document.querySelectorAll("[data-tool]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.tool === tool)));
+  svg.className = "tool-" + (tool.startsWith("arrow") ? "bond" : tool);
+  $("#tool-readout").textContent = "Tool: " + TOOL_LABELS[tool];
+  $("#hint-tool-name").textContent = TOOL_LABELS[tool];
+  $("#hint-tool-desc").textContent = TOOL_DESCRIPTIONS[tool];
+  announce(TOOL_LABELS[tool] + " tool active. " + TOOL_DESCRIPTIONS[tool]);
+}
+
+function setElement(sym){
+  state.currentElement = sym;
+  document.querySelectorAll("[data-el]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.el === sym)));
+  announce("Element set to " + sym + ".");
+}
+
+function selectEntity(kind, id){
+  state.selection = kind ? { kind, id } : null;
+  renderAll();
+  if(kind) announce((kind[0].toUpperCase()+kind.slice(1)) + " selected.");
+}
+
+/* =========================================================================
+   15. POINTER INTERACTION
+   ========================================================================= */
+let dragState = null; // {mode:'move-atom'|'move-text'|'move-arrow'|'pan', ...}
+
+svg.addEventListener("contextmenu", e => e.preventDefault());
+
+svg.addEventListener("pointerdown", (e) => {
+  svg.setPointerCapture(e.pointerId);
+  const world = toWorld(e.clientX, e.clientY);
+
+  if(e.button === 1 || state.spaceHeld){
+    dragState = { mode:"pan", startClientX:e.clientX, startClientY:e.clientY, startPan:{...state.pan} };
+    svg.classList.add("panning");
+    return;
+  }
+
+  if(state.tool === "select"){
+    const hit = findEntityNear(world);
+    selectEntity(hit ? hit.kind : null, hit ? hit.id : null);
+    if(hit && hit.kind === "atom") dragState = { mode:"move-atom", id: hit.id };
+    else if(hit && hit.kind === "text") dragState = { mode:"move-text", id: hit.id };
+    else if(hit && hit.kind === "arrow") dragState = { mode:"move-arrow", id: hit.id, start:{...world} };
+    return;
+  }
+
+  if(state.tool === "erase"){
+    const hit = findEntityNear(world);
+    if(hit){ deleteEntity(hit.kind, hit.id); state.selection = null; pushHistory(); renderAll(); announce("Erased " + hit.kind + "."); }
+    return;
+  }
+
+  if(state.tool === "atom"){
+    const hit = findAtomNear(world);
+    if(hit){ hit.element = state.currentElement; pushHistory(); renderAll(); announce("Atom relabeled " + state.currentElement + "."); }
+    else{ const id = addAtom(world, state.currentElement); pushHistory(); renderAll(); announce(state.currentElement + " atom placed."); }
+    return;
+  }
+
+  if(state.tool === "text"){
+    const p = snapToGrid(world);
+    const id = uid("text");
+    state.scene.texts[id] = { id, x:p.x, y:p.y, text:"Label", fontSizePt:14, isBold:false };
+    pushHistory();
+    setTool("select");
+    selectEntity("text", id);
+    announce("Text label added.");
+    return;
+  }
+
+  if(state.tool === "bond"){
+    const hitAtom = findAtomNear(world);
+    if(hitAtom){
+      const bond = findBondNear(world, 6);
+      if(bond && !hitAtom){ cycleBond(bond); pushHistory(); renderAll(); return; }
+      dragState = { mode:"draw-bond", startAtomId: hitAtom.id };
+      state.bondDraft = { startAtomId: hitAtom.id, x:hitAtom.x, y:hitAtom.y };
+    } else {
+      const existingBond = findBondNear(world, 6);
+      if(existingBond){ cycleBond(existingBond); pushHistory(); renderAll(); announce("Bond type changed."); return; }
+      const newId = addAtom(world, "C");
+      dragState = { mode:"draw-bond", startAtomId: newId };
+      state.bondDraft = { startAtomId: newId, x: world.x, y: world.y };
+    }
+    return;
+  }
+
+  if(state.tool.startsWith("arrow-")){
+    const p = snapToGrid(world);
+    dragState = { mode:"draw-arrow", start:p };
+    state.bondDraft = { startPoint:p, x:p.x, y:p.y };
+  }
+});
+
+svg.addEventListener("pointermove", (e) => {
+  const world = toWorld(e.clientX, e.clientY);
+  if(!dragState) return;
+
+  if(dragState.mode === "pan"){
+    state.pan.x = dragState.startPan.x + (e.clientX - dragState.startClientX);
+    state.pan.y = dragState.startPan.y + (e.clientY - dragState.startClientY);
+    applyViewportTransform();
+    return;
+  }
+  if(dragState.mode === "move-atom"){
+    const atom = state.scene.atoms[dragState.id];
+    if(atom){ const p = snapToGrid(world); atom.x = p.x; atom.y = p.y; renderEntities(); }
+    return;
+  }
+  if(dragState.mode === "move-text"){
+    const t = state.scene.texts[dragState.id];
+    if(t){ const p = snapToGrid(world); t.x = p.x; t.y = p.y; renderEntities(); }
+    return;
+  }
+  if(dragState.mode === "move-arrow"){
+    const a = state.scene.arrows[dragState.id];
+    if(a){
+      const dx = world.x - dragState.start.x, dy = world.y - dragState.start.y;
+      a.x1 += dx; a.y1 += dy; a.x2 += dx; a.y2 += dy;
+      dragState.start = world;
+      renderEntities();
+    }
+    return;
+  }
+  if(dragState.mode === "draw-bond"){
+    const startAtom = state.scene.atoms[dragState.startAtomId];
+    const snapped = snapAngleTo(startAtom, world, currentStyle().bondLength);
+    state.bondDraft.x = snapped.x; state.bondDraft.y = snapped.y;
+    renderEntities();
+    return;
+  }
+  if(dragState.mode === "draw-arrow"){
+    const snapped = snapAngleTo(dragState.start, world, null);
+    state.bondDraft.x = snapped.x; state.bondDraft.y = snapped.y;
+    renderEntities();
+    return;
+  }
+});
+
+function endPointerInteraction(e){
+  if(!dragState) return;
+  const world = toWorld(e.clientX, e.clientY);
+
+  if(dragState.mode === "pan"){ svg.classList.remove("panning"); dragState = null; return; }
+
+  if(dragState.mode === "draw-bond"){
+    const startAtom = state.scene.atoms[dragState.startAtomId];
+    const endPos = snapAngleTo(startAtom, world, currentStyle().bondLength);
+    const target = findAtomNear(endPos);
+    let endId;
+    if(target && target.id !== dragState.startAtomId) endId = target.id;
+    else endId = addAtom(endPos, state.currentElement === "H" ? "C" : "C");
+    if(endId !== dragState.startAtomId) createOrCycleBond(dragState.startAtomId, endId);
+    state.bondDraft = null;
+    pushHistory();
+    renderAll();
+    announce("Bond drawn.");
+  } else if(dragState.mode === "draw-arrow"){
+    const endPos = snapAngleTo(dragState.start, world, null);
+    if(dist(dragState.start, endPos) > 8){
+      const typeMap = { "arrow-forward":"SYNTHETIC_FORWARD", "arrow-eq":"EQUILIBRIUM", "arrow-res":"RESONANCE", "arrow-retro":"RETROSYNTHETIC" };
+      const id = uid("arrow");
+      state.scene.arrows[id] = { id, arrowType: typeMap[state.tool], x1:dragState.start.x, y1:dragState.start.y, x2:endPos.x, y2:endPos.y, conditionsTop:"", conditionsBottom:"" };
+      state.bondDraft = null;
+      pushHistory();
+      setTool("select");
+      selectEntity("arrow", id);
+      announce("Reaction arrow added.");
+    } else {
+      state.bondDraft = null;
+      renderEntities();
+    }
+  } else if(dragState.mode.startsWith("move-")){
+    pushHistory();
+  }
+  dragState = null;
+}
+svg.addEventListener("pointerup", endPointerInteraction);
+svg.addEventListener("pointercancel", endPointerInteraction);
+
+svg.addEventListener("wheel", (e) => {
+  e.preventDefault();
+  const factor = e.deltaY < 0 ? 1.1 : 0.9;
+  zoomAt(e.clientX, e.clientY, factor);
+}, { passive:false });
+
+/* =========================================================================
+   16. KEYBOARD INTERACTION
+   ========================================================================= */
+function isTypingTarget(e){
+  const t = e.target;
+  return t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable);
+}
+
+svg.addEventListener("focus", renderKeyboardCursor);
+svg.addEventListener("blur", renderKeyboardCursor);
+
+svg.addEventListener("keydown", (e) => {
+  const step = e.shiftKey ? GRID_STEP * 2 : GRID_STEP;
+  const kc = state.keyboardCursor;
+
+  if(["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"].includes(e.key)){
+    e.preventDefault();
+    if(state.selection){
+      const moved = moveSelectionBy(
+        e.key === "ArrowLeft" ? -step : e.key === "ArrowRight" ? step : 0,
+        e.key === "ArrowUp" ? -step : e.key === "ArrowDown" ? step : 0
+      );
+      if(moved){ renderEntities(); renderStructureSummary(); return; }
+    }
+    if(e.key === "ArrowLeft") kc.x -= step;
+    if(e.key === "ArrowRight") kc.x += step;
+    if(e.key === "ArrowUp") kc.y -= step;
+    if(e.key === "ArrowDown") kc.y += step;
+    renderKeyboardCursor();
+    return;
+  }
+
+  if(e.key === "Enter" || e.key === " "){
+    e.preventDefault();
+    performActiveToolAtCursor();
+    return;
+  }
+
+  if(e.key === "Escape"){
+    if(state.bondDraft){ state.bondDraft = null; renderEntities(); announce("Cancelled."); }
+    else selectEntity(null, null);
+    return;
+  }
+
+  if(e.key === "Delete" || e.key === "Backspace"){
+    if(state.selection){
+      e.preventDefault();
+      deleteEntity(state.selection.kind, state.selection.id);
+      const k = state.selection.kind;
+      state.selection = null;
+      pushHistory();
+      renderAll();
+      announce("Deleted " + k + ".");
+    }
+    return;
+  }
+});
+
+function moveSelectionBy(dx, dy){
+  if(!state.selection) return false;
+  const { kind, id } = state.selection;
+  let obj = kind === "atom" ? state.scene.atoms[id] : kind === "text" ? state.scene.texts[id] : null;
+  if(obj){ obj.x += dx; obj.y += dy; scheduleHistoryPush(); return true; }
+  if(kind === "arrow"){ const a = state.scene.arrows[id]; if(a){ a.x1+=dx; a.y1+=dy; a.x2+=dx; a.y2+=dy; scheduleHistoryPush(); return true; } }
+  return false;
+}
+let nudgeTimer = null;
+function scheduleHistoryPush(){ clearTimeout(nudgeTimer); nudgeTimer = setTimeout(pushHistory, 400); }
+
+function performActiveToolAtCursor(){
+  const pos = { x: state.keyboardCursor.x, y: state.keyboardCursor.y };
+  const tool = state.tool;
+
+  if(tool === "select"){
+    const hit = findEntityNear(pos);
+    selectEntity(hit ? hit.kind : null, hit ? hit.id : null);
+    return;
+  }
+  if(tool === "erase"){
+    const hit = findEntityNear(pos);
+    if(hit){ deleteEntity(hit.kind, hit.id); state.selection = null; pushHistory(); renderAll(); announce("Erased " + hit.kind + "."); }
+    else announce("Nothing near the keyboard cursor to erase.");
+    return;
+  }
+  if(tool === "atom"){
+    const hit = findAtomNear(pos);
+    if(hit){ hit.element = state.currentElement; pushHistory(); renderAll(); announce("Atom relabeled " + state.currentElement + "."); }
+    else{ addAtom(pos, state.currentElement); pushHistory(); renderAll(); announce(state.currentElement + " atom placed at cursor."); }
+    return;
+  }
+  if(tool === "text"){
+    const id = uid("text");
+    state.scene.texts[id] = { id, x:pos.x, y:pos.y, text:"Label", fontSizePt:14, isBold:false };
+    pushHistory(); setTool("select"); selectEntity("text", id);
+    announce("Text label added at cursor.");
+    return;
+  }
+  if(tool === "bond"){
+    if(!state.bondDraft){
+      const hit = findAtomNear(pos);
+      const startId = hit ? hit.id : addAtom(pos, "C");
+      state.bondDraft = { startAtomId: startId, x: state.scene.atoms[startId].x, y: state.scene.atoms[startId].y };
+      announce("Bond start set. Move the keyboard cursor and press Enter to finish.");
+    } else {
+      const startAtom = state.scene.atoms[state.bondDraft.startAtomId];
+      const endPos = snapAngleTo(startAtom, pos, null);
+      const target = findAtomNear(endPos);
+      const endId = target && target.id !== state.bondDraft.startAtomId ? target.id : addAtom(endPos, "C");
+      if(endId !== state.bondDraft.startAtomId){ createOrCycleBond(state.bondDraft.startAtomId, endId); announce("Bond completed."); }
+      state.bondDraft = null;
+      pushHistory(); renderAll();
+    }
+    return;
+  }
+  if(tool.startsWith("arrow-")){
+    if(!state.bondDraft){
+      state.bondDraft = { startPoint: {...pos}, x:pos.x, y:pos.y };
+      announce("Arrow start set. Move the keyboard cursor and press Enter to finish.");
+    } else {
+      const typeMap = { "arrow-forward":"SYNTHETIC_FORWARD", "arrow-eq":"EQUILIBRIUM", "arrow-res":"RESONANCE", "arrow-retro":"RETROSYNTHETIC" };
+      const id = uid("arrow");
+      const start = state.bondDraft.startPoint;
+      state.scene.arrows[id] = { id, arrowType: typeMap[tool], x1:start.x, y1:start.y, x2:pos.x, y2:pos.y, conditionsTop:"", conditionsBottom:"" };
+      state.bondDraft = null;
+      pushHistory(); setTool("select"); selectEntity("arrow", id);
+      announce("Reaction arrow added.");
+    }
+  }
+}
+
+/* Global shortcuts that should work regardless of focus (except while typing) */
+window.addEventListener("keydown", (e) => {
+  if(isTypingTarget(e)) return;
+
+  if(e.code === "Space"){ state.spaceHeld = true; svg.classList.add("pan-mode"); }
+
+  const mod = e.ctrlKey || e.metaKey;
+  if(mod && e.key.toLowerCase() === "z"){
+    e.preventDefault();
+    if(e.shiftKey) redo(); else undo();
+    return;
+  }
+  if(mod && e.key.toLowerCase() === "y"){ e.preventDefault(); redo(); return; }
+
+  const toolKeys = { v:"select", a:"atom", b:"bond", t:"text", e:"erase", r:"arrow-forward" };
+  const k = e.key.toLowerCase();
+  if(toolKeys[k] && document.activeElement !== $("#doc-name")){
+    setTool(toolKeys[k]);
+    return;
+  }
+
+  if(state.tool === "atom"){
+    const elKeys = { c:"C", n:"N", o:"O", s:"S", p:"P", f:"F", h:"H", b:"B" };
+    if(elKeys[k] && k !== "b"){ setElement(elKeys[k]); return; } // 'b' reserved for Bond tool above
+  }
+});
+window.addEventListener("keyup", (e) => {
+  if(e.code === "Space"){ state.spaceHeld = false; svg.classList.remove("pan-mode"); }
+});
+
+/* =========================================================================
+   17. EXPORT
+   ========================================================================= */
+function computeBBox(){
+  let minX=Infinity, minY=Infinity, maxX=-Infinity, maxY=-Infinity;
+  const consider = (x,y) => { minX=Math.min(minX,x); minY=Math.min(minY,y); maxX=Math.max(maxX,x); maxY=Math.max(maxY,y); };
+  Object.values(state.scene.atoms).forEach(a => consider(a.x,a.y));
+  Object.values(state.scene.arrows).forEach(a => { consider(a.x1,a.y1); consider(a.x2,a.y2); });
+  Object.values(state.scene.texts).forEach(t => consider(t.x,t.y));
+  if(!isFinite(minX)) return { x:0, y:0, width:400, height:300 };
+  const pad = 40;
+  return { x:minX-pad, y:minY-pad, width:(maxX-minX)+pad*2, height:(maxY-minY)+pad*2 };
+}
+
+function buildExportSvg(){
+  const box = computeBBox();
+  const style = currentStyle();
+  const root = el("svg", { xmlns:NS, viewBox:`${box.x} ${box.y} ${box.width} ${box.height}`, width: Math.round(box.width), height: Math.round(box.height) });
+  root.appendChild(el("rect", { x:box.x, y:box.y, width:box.width, height:box.height, fill:"#FFFFFF" }));
+  const g = el("g", {});
+  // temporarily render without selection highlighting into this detached group
+  const prevSel = state.selection; state.selection = null;
+  const spacing = style.bondLength * style.bondSpacing;
+
+  Object.values(state.scene.bonds).forEach(bond => {
+    const ends = bondEndpoints(bond); if(!ends) return;
+    const { p1, p2 } = ends;
+    if(bond.stereo === "WEDGE"){
+      const perp = perpendicular(p2.x-p1.x, p2.y-p1.y); const halfW = style.boldWidth/2;
+      g.appendChild(el("polygon", { points:`${p1.x},${p1.y} ${p2.x+perp.x*halfW},${p2.y+perp.y*halfW} ${p2.x-perp.x*halfW},${p2.y-perp.y*halfW}`, fill:"#1F2937" }));
+    } else if(bond.stereo === "HASH"){
+      const n = style.hashCount; const perp = perpendicular(p2.x-p1.x, p2.y-p1.y);
+      for(let i=1;i<=n;i++){ const t=i/n; const cx=p1.x+(p2.x-p1.x)*t, cy=p1.y+(p2.y-p1.y)*t; const w=(style.boldWidth/2)*t;
+        g.appendChild(el("line",{x1:cx-perp.x*w,y1:cy-perp.y*w,x2:cx+perp.x*w,y2:cy+perp.y*w,stroke:"#1F2937","stroke-width":style.bondWidth*0.9})); }
+    } else {
+      const lines = bond.order===1?[0]:bond.order===2?[-spacing/2,spacing/2]:[-spacing,0,spacing];
+      const perp = perpendicular(p2.x-p1.x, p2.y-p1.y); const trim = bond.order>1?0.14:0;
+      lines.forEach(off => { const ox=perp.x*off, oy=perp.y*off; const tx=(p2.x-p1.x)*trim, ty=(p2.y-p1.y)*trim;
+        g.appendChild(el("line",{x1:p1.x+ox+(off!==0?tx:0),y1:p1.y+oy+(off!==0?ty:0),x2:p2.x+ox-(off!==0?tx:0),y2:p2.y+oy-(off!==0?ty:0),stroke:"#1F2937","stroke-width":style.bondWidth,"stroke-linecap":"round"})); });
+    }
+  });
+  Object.values(state.scene.atoms).forEach(atom => {
+    const label = atomLabelText(atom); if(!label) return;
+    const v = atomValenceInfo(atom);
+    let text = label;
+    if(v.checked && v.implicitH>0) text += "H" + (v.implicitH>1?subDigits(v.implicitH):"");
+    text += chargeSuperscript(atom.charge);
+    const w = Math.max(text.length*style.fontSize*0.62, style.fontSize*0.9);
+    g.appendChild(el("rect", { x:atom.x-w/2, y:atom.y-style.fontSize*0.62, width:w, height:style.fontSize*1.2, fill:"#FFFFFF" }));
+    const t = el("text", { x:atom.x, y:atom.y, "text-anchor":"middle", "dominant-baseline":"central", "font-family":"IBM Plex Mono, monospace", "font-size":style.fontSize, "font-weight":600, fill:"#1F2937" });
+    t.textContent = text; g.appendChild(t);
+  });
+  Object.values(state.scene.arrows).forEach(arrow => {
+    const dx=arrow.x2-arrow.x1, dy=arrow.y2-arrow.y1, angle=Math.atan2(dy,dx), head=style.arrowHead;
+    function headPts(tipX,tipY,dirAngle){ const a1=dirAngle+Math.PI-0.45,a2=dirAngle+Math.PI+0.45;
+      return `${tipX},${tipY} ${tipX+head*Math.cos(a1)},${tipY+head*Math.sin(a1)} ${tipX+head*Math.cos(a2)},${tipY+head*Math.sin(a2)}`; }
+    if(arrow.arrowType==="EQUILIBRIUM"){ const perp=perpendicular(dx,dy),off=4;
+      g.appendChild(el("line",{x1:arrow.x1+perp.x*off,y1:arrow.y1+perp.y*off,x2:arrow.x2+perp.x*off,y2:arrow.y2+perp.y*off,stroke:"#1F2937","stroke-width":1.6}));
+      g.appendChild(el("polygon",{points:headPts(arrow.x2+perp.x*off,arrow.y2+perp.y*off,angle),fill:"#1F2937"}));
+      g.appendChild(el("line",{x1:arrow.x2-perp.x*off,y1:arrow.y2-perp.y*off,x2:arrow.x1-perp.x*off,y2:arrow.y1-perp.y*off,stroke:"#1F2937","stroke-width":1.6}));
+      g.appendChild(el("polygon",{points:headPts(arrow.x1-perp.x*off,arrow.y1-perp.y*off,angle+Math.PI),fill:"#1F2937"}));
+    } else if(arrow.arrowType==="RESONANCE"){
+      g.appendChild(el("line",{x1:arrow.x1,y1:arrow.y1,x2:arrow.x2,y2:arrow.y2,stroke:"#1F2937","stroke-width":1.6}));
+      g.appendChild(el("polygon",{points:headPts(arrow.x2,arrow.y2,angle),fill:"#1F2937"}));
+      g.appendChild(el("polygon",{points:headPts(arrow.x1,arrow.y1,angle+Math.PI),fill:"#1F2937"}));
+    } else if(arrow.arrowType==="RETROSYNTHETIC"){ const perp=perpendicular(dx,dy);
+      [2.5,-2.5].forEach(o=>g.appendChild(el("line",{x1:arrow.x1+perp.x*o,y1:arrow.y1+perp.y*o,x2:arrow.x2+perp.x*o,y2:arrow.y2+perp.y*o,stroke:"#1F2937","stroke-width":1.4})));
+      g.appendChild(el("polygon",{points:headPts(arrow.x2,arrow.y2,angle),fill:"#1F2937"}));
+    } else {
+      g.appendChild(el("line",{x1:arrow.x1,y1:arrow.y1,x2:arrow.x2,y2:arrow.y2,stroke:"#1F2937","stroke-width":1.6}));
+      g.appendChild(el("polygon",{points:headPts(arrow.x2,arrow.y2,angle),fill:"#1F2937"}));
+    }
+    const midX=(arrow.x1+arrow.x2)/2, midY=(arrow.y1+arrow.y2)/2;
+    if(arrow.conditionsTop) g.appendChild(textEl(midX, midY-12, arrow.conditionsTop, 11));
+    if(arrow.conditionsBottom) g.appendChild(textEl(midX, midY+16, arrow.conditionsBottom, 11));
+  });
+  Object.values(state.scene.texts).forEach(t => {
+    const tt = el("text", { x:t.x, y:t.y, "font-family":"IBM Plex Sans, sans-serif", "font-size":t.fontSizePt, "font-weight": t.isBold?700:400, fill:"#1F2937" });
+    tt.textContent = t.text; g.appendChild(tt);
+  });
+
+  root.appendChild(g);
+  state.selection = prevSel;
+  return root;
+}
+
+function downloadBlob(blob, filename){
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+
+function safeFilename(){
+  return ($("#doc-name").value || "structure").trim().replace(/[^a-z0-9\-_ ]/gi,"").replace(/\s+/g,"-").toLowerCase() || "structure";
+}
+
+function exportSVG(){
+  const svgEl = buildExportSvg();
+  const s = new XMLSerializer().serializeToString(svgEl);
+  const blob = new Blob([s], { type:"image/svg+xml" });
+  downloadBlob(blob, safeFilename() + ".svg");
+  announce("SVG downloaded.");
+}
+
+function rasterize(scaleFactor){
+  return new Promise((resolve) => {
+    const svgEl = buildExportSvg();
+    const box = computeBBox();
+    const s = new XMLSerializer().serializeToString(svgEl);
+    const url = URL.createObjectURL(new Blob([s], { type:"image/svg+xml;charset=utf-8" }));
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(Math.round(box.width*scaleFactor), 40);
+      canvas.height = Math.max(Math.round(box.height*scaleFactor), 40);
+      const ctx = canvas.getContext("2d");
+      ctx.fillStyle = "#FFFFFF"; ctx.fillRect(0,0,canvas.width,canvas.height);
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      URL.revokeObjectURL(url);
+      canvas.toBlob(blob => resolve(blob), "image/png");
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); resolve(null); };
+    img.src = url;
+  });
+}
+
+async function exportPNG(){
+  const blob = await rasterize(4);
+  if(!blob){ announce("PNG export failed."); return; }
+  downloadBlob(blob, safeFilename() + ".png");
+  announce("PNG downloaded.");
+}
+
+async function copyImage(){
+  try{
+    if(!navigator.clipboard || !window.ClipboardItem){ throw new Error("Clipboard API unavailable"); }
+    const blob = await rasterize(4);
+    if(!blob) throw new Error("Rasterize failed");
+    await navigator.clipboard.write([ new ClipboardItem({ "image/png": blob }) ]);
+    announce("Structure image copied to clipboard.");
+  }catch(err){
+    console.warn(err);
+    announce("Couldn't access the clipboard here \u2014 use Download SVG or Download PNG instead.");
+  }
+}
+
+/* =========================================================================
+   18. TEMPLATES
+   ========================================================================= */
+function insertBenzeneAt(cx, cy){
+  const r = currentStyle().bondLength * 0.85;
+  const ids = [];
+  for(let i=0;i<6;i++){
+    const angle = -Math.PI/2 + i * (Math.PI/3);
+    ids.push(addAtom({ x: cx + r*Math.cos(angle), y: cy + r*Math.sin(angle) }, "C"));
+  }
+  for(let i=0;i<6;i++){
+    const bond = createOrCycleBond(ids[i], ids[(i+1)%6]);
+    if(i % 2 === 0) state.scene.bonds[bond].order = 2;
+  }
+  pushHistory(); renderAll(); announce("Benzene ring inserted.");
+}
+
+function insertGlycineAt(cx, cy){
+  const L = currentStyle().bondLength;
+  const n = addAtom({ x:cx-L, y:cy }, "N");
+  const ca = addAtom({ x:cx, y:cy }, "C");
+  const c = addAtom({ x:cx+L*0.87, y:cy-L*0.5 }, "C");
+  const o1 = addAtom({ x:cx+L*1.73, y:cy }, "O");
+  const o2 = addAtom({ x:cx+L*0.87, y:cy-L*1.5 }, "O");
+  createOrCycleBond(n, ca);
+  createOrCycleBond(ca, c);
+  createOrCycleBond(c, o1);
+  const dbl = createOrCycleBond(c, o2); state.scene.bonds[dbl].order = 2;
+  pushHistory(); renderAll(); announce("Glycine inserted.");
+}
+
+/* =========================================================================
+   19. UI WIRING
+   ========================================================================= */
+document.querySelectorAll("[data-tool]").forEach(btn => btn.addEventListener("click", () => setTool(btn.dataset.tool)));
+document.querySelectorAll("[data-el]").forEach(btn => btn.addEventListener("click", () => { setElement(btn.dataset.el); if(state.tool!=="atom") setTool("atom"); }));
+
+$("#custom-el-go").addEventListener("click", () => {
+  const v = $("#custom-el").value.trim();
+  if(!v) return;
+  const sym = v[0].toUpperCase() + v.slice(1).toLowerCase();
+  setElement(sym);
+  if(state.tool !== "atom") setTool("atom");
+});
+
+$("#btn-undo").addEventListener("click", undo);
+$("#btn-redo").addEventListener("click", redo);
+$("#btn-export-svg").addEventListener("click", exportSVG);
+$("#btn-export-png").addEventListener("click", exportPNG);
+$("#btn-copy-image").addEventListener("click", copyImage);
+
+$("#btn-new-doc").addEventListener("click", () => {
+  if(!confirm("Start a new document? Unsaved changes to the current one will be replaced.")) return;
+  state.scene = emptyScene();
+  state.selection = null;
+  state.history = []; state.historyIndex = -1;
+  $("#doc-name").value = state.scene.title;
+  pushHistory();
+  renderAll();
+  announce("New document started.");
+});
+
+$("#doc-name").addEventListener("change", () => { state.scene.title = $("#doc-name").value; scheduleSave(); });
+
+$("#zoom-in").addEventListener("click", () => { const r = svg.getBoundingClientRect(); zoomAt(r.left+r.width/2, r.top+r.height/2, 1.2); });
+$("#zoom-out").addEventListener("click", () => { const r = svg.getBoundingClientRect(); zoomAt(r.left+r.width/2, r.top+r.height/2, 0.83); });
+$("#zoom-reset").addEventListener("click", resetZoom);
+
+$("#chk-hc").addEventListener("change", (e) => {
+  state.highContrast = e.target.checked;
+  document.body.classList.toggle("hc", state.highContrast);
+  announce("High-contrast mode " + (state.highContrast ? "on" : "off") + ".");
+});
+$("#chk-grid-snap").addEventListener("change", (e) => { state.gridSnap = e.target.checked; });
+$("#chk-angle-snap").addEventListener("change", (e) => { state.angleSnap = e.target.checked; });
+$("#font-scale").addEventListener("change", (e) => { document.body.style.fontSize = e.target.value + "px"; });
+$("#style-preset").addEventListener("change", (e) => { state.scene.stylePreset = e.target.value; pushHistory(); renderAll(); });
+
+$("#tpl-benzene").addEventListener("click", () => insertBenzeneAt(state.keyboardCursor.x, state.keyboardCursor.y));
+$("#tpl-glycine").addEventListener("click", () => insertGlycineAt(state.keyboardCursor.x, state.keyboardCursor.y));
+
+window.addEventListener("resize", () => {});
+
+/* =========================================================================
+   20. INIT
+   ========================================================================= */
+async function init(){
+  const loaded = await loadOnStart();
+  if(!loaded){
+    // Seed a tiny example (ethanol) so first-time users see how a structure looks.
+    const c1 = addAtom({x:420,y:340}, "C");
+    const c2 = addAtom({x:460,y:317}, "C");
+    const o  = addAtom({x:500,y:340}, "O");
+    createOrCycleBond(c1,c2);
+    createOrCycleBond(c2,o);
+  }
+  $("#doc-name").value = state.scene.title || "Untitled structure";
+  document.body.classList.toggle("hc", state.highContrast);
+  setTool("select");
+  setElement("C");
+  pushHistory();
+  renderAll();
+  setZoomReadout();
+  applyViewportTransform();
+  announce("Bench ready. " + Object.keys(state.scene.atoms).length + " atom(s) loaded.");
+}
+init();
+
+})();
+</script>
+</body>
+</html>
