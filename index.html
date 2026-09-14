@@ -158,7 +158,8 @@
 
   /* ---------- Canvas ---------- */
   .canvas-wrap{ position:relative; background:var(--bg-app); overflow:hidden; }
-  #scene-svg{ width:100%; height:100%; display:block; background:var(--paper); cursor:crosshair; touch-action:none; }
+  #scene-svg{ width:100%; height:100%; display:block; background:var(--paper); cursor:crosshair; touch-action:none; user-select:none; -webkit-user-select:none; -webkit-touch-callout:none; }
+  #scene-svg text{ user-select:none; -webkit-user-select:none; }
   #scene-svg.tool-select{ cursor:default; }
   #scene-svg.tool-erase{ cursor:not-allowed; }
   #scene-svg.pan-mode{ cursor:grab; }
@@ -1792,7 +1793,9 @@ let dragState = null; // {mode:'move-atom'|'move-text'|'move-arrow'|'pan', ...}
 svg.addEventListener("contextmenu", e => e.preventDefault());
 
 svg.addEventListener("pointerdown", (e) => {
+  e.preventDefault();
   svg.setPointerCapture(e.pointerId);
+  svg.focus({ preventScroll: true });
   const world = toWorld(e.clientX, e.clientY);
 
   if(e.button === 1 || state.spaceHeld){
@@ -1802,7 +1805,6 @@ svg.addEventListener("pointerdown", (e) => {
   }
 
   if(e.shiftKey){
-    svg.focus();
     state.keyboardCursor = snapToGrid(world);
     renderKeyboardCursor();
     announce("Keyboard cursor moved here.");
