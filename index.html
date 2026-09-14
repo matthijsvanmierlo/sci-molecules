@@ -1216,7 +1216,7 @@ function setTool(tool){
   state.tool = tool;
   state.bondDraft = null;
   document.querySelectorAll("[data-tool]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.tool === tool)));
-  svg.className = "tool-" + (tool.startsWith("arrow") ? "bond" : tool);
+  svg.setAttribute("class", "tool-" + (tool.startsWith("arrow") ? "bond" : tool));
   $("#tool-readout").textContent = "Tool: " + TOOL_LABELS[tool];
   $("#hint-tool-name").textContent = TOOL_LABELS[tool];
   $("#hint-tool-desc").textContent = TOOL_DESCRIPTIONS[tool];
