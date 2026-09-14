@@ -336,6 +336,7 @@
           <rect id="grid-bg" x="-4000" y="-4000" width="8000" height="8000" fill="url(#grid-pattern)"></rect>
           <g id="entities-layer"></g>
           <g id="keyboard-cursor-layer"></g>
+          <g id="marquee-layer"></g>
         </g>
       </svg>
       <p id="canvas-instructions" class="sr-only">
@@ -343,8 +344,9 @@
         or use the keyboard: arrow keys move a keyboard cursor in grid steps, Enter performs the active tool's
         action at the cursor, Escape cancels an in-progress bond or arrow, Delete removes the selected item.
         Open Structure summary in the right-hand panel for a full text description of the current molecule.
+        With the Select tool, drag across empty canvas to select several items as a group, and shift-click anywhere to jump the keyboard cursor to that spot.
       </p>
-      <div class="hint-toast" id="hint-toast" role="note">Tool: <strong id="hint-tool-name">Select</strong> &mdash; <span id="hint-tool-desc">click an item to select and drag to move it.</span></div>
+      <div class="hint-toast" id="hint-toast" role="note">Tool: <strong id="hint-tool-name">Select</strong> &mdash; <span id="hint-tool-desc">click an item to select and drag to move it, or drag across empty space to select a group.</span></div>
       <div class="zoom-controls" role="group" aria-label="Zoom controls">
         <button id="zoom-in" aria-label="Zoom in">+</button>
         <button id="zoom-reset" aria-label="Reset zoom to fit">&#9723;</button>
@@ -405,6 +407,8 @@
           <p><kbd>Enter</kbd> perform active tool at keyboard cursor &nbsp;<kbd>Esc</kbd> cancel</p>
           <p>Click an existing bond with the Bond tool to cycle single &rarr; double &rarr; triple &rarr; wedge &rarr; hash.</p>
           <p>Mouse wheel zooms toward the pointer. Hold <kbd>Space</kbd> and drag, or drag with the middle mouse button, to pan.</p>
+          <p>With the Select tool, drag across empty canvas to draw a selection box; everything inside becomes one group you can drag, nudge with arrow keys, or delete together.</p>
+          <p>Shift+click anywhere on the canvas to jump the keyboard cursor straight to that spot, instead of stepping it there with the arrow keys.</p>
           <p>The Atom, Bond, and Erase tools stay active so you can place, chain, or clear several things in a row; Text and the reaction arrows switch back to Select after one, since you'll usually want to type or edit right away.</p>
           <p>Templates and pasted SMILES both insert at the keyboard cursor's position, then hand control to the Select tool so you can drag the result into place.</p>
         </div>
@@ -1201,6 +1205,7 @@ const svg = document.getElementById("scene-svg");
 const viewport = document.getElementById("viewport");
 const entitiesLayer = document.getElementById("entities-layer");
 const cursorLayer = document.getElementById("keyboard-cursor-layer");
+const marqueeLayer = document.getElementById("marquee-layer");
 const NS = "http://www.w3.org/2000/svg";
 
 function el(tag, attrs, children){
@@ -1217,11 +1222,23 @@ function applyViewportTransform(){
 function renderAll(){
   renderEntities();
   renderKeyboardCursor();
+  renderMarquee();
   renderProperties();
   renderStructureSummary();
   applyViewportTransform();
   updateValenceReadout();
   updateHistoryButtons();
+}
+
+// True if (kind,id) is the lone selection, or a member of a group selection.
+function isEntitySelected(kind, id){
+  const sel = state.selection;
+  if(!sel) return false;
+  if(sel.kind === "group") return sel.ids.some(e => e.kind === kind && e.id === id);
+  return sel.kind === kind && sel.id === id;
+}
+function groupIds(){
+  return (state.selection && state.selection.kind === "group") ? state.selection.ids : [];
 }
 
 function bondEndpoints(bond){
@@ -1243,7 +1260,8 @@ function renderEntities(){
     if(!ends) return;
     const { p1, p2 } = ends;
     const g = el("g", { "data-kind":"bond", "data-id": bond.id, tabindex:"-1" });
-    const isSel = state.selection && state.selection.kind === "bond" && state.selection.id === bond.id;
+    const isSel = isEntitySelected("bond", bond.id) ||
+      (isEntitySelected("atom", bond.a1) && isEntitySelected("atom", bond.a2));
     const stroke = isSel ? "var(--accent)" : "var(--ink)";
     const sw = style.bondWidth * (isSel ? 1.4 : 1);
 
@@ -1284,7 +1302,7 @@ function renderEntities(){
   // Atoms
   Object.values(state.scene.atoms).forEach(atom => {
     const g = el("g", { "data-kind":"atom", "data-id": atom.id });
-    const isSel = state.selection && state.selection.kind === "atom" && state.selection.id === atom.id;
+    const isSel = isEntitySelected("atom", atom.id);
     const valence = atomValenceInfo(atom);
     const label = atomLabelText(atom);
 
@@ -1319,7 +1337,7 @@ function renderEntities(){
 
   // Text annotations
   Object.values(state.scene.texts).forEach(t => {
-    const isSel = state.selection && state.selection.kind === "text" && state.selection.id === t.id;
+    const isSel = isEntitySelected("text", t.id);
     const g = el("g", { "data-kind":"text", "data-id": t.id });
     if(isSel) g.appendChild(el("rect", { x:t.x-4, y:t.y-t.fontSizePt, width: Math.max(t.text.length*t.fontSizePt*0.55,20)+8, height:t.fontSizePt*1.4, fill:"var(--accent-tint)", opacity:.5 }));
     const el2 = el("text", { x:t.x, y:t.y, "font-family":"var(--font-sans)", "font-size":t.fontSizePt, "font-weight": t.isBold ? 700 : 400, fill:"var(--ink)" });
@@ -1344,7 +1362,7 @@ function subDigits(n){
 }
 
 function renderArrow(arrow, style){
-  const isSel = state.selection && state.selection.kind === "arrow" && state.selection.id === arrow.id;
+  const isSel = isEntitySelected("arrow", arrow.id);
   const stroke = isSel ? "var(--accent)" : "var(--ink)";
   const g = el("g", { "data-kind":"arrow", "data-id": arrow.id });
   const dx = arrow.x2 - arrow.x1, dy = arrow.y2 - arrow.y1;
@@ -1401,6 +1419,43 @@ function renderKeyboardCursor(){
   cursorLayer.appendChild(el("line", { x1:c.x, y1:c.y-14, x2:c.x, y2:c.y+14, stroke:"var(--focus)", "stroke-width":1 }));
 }
 
+function rectFromPoints(a, b){
+  return { x: Math.min(a.x,b.x), y: Math.min(a.y,b.y), width: Math.abs(a.x-b.x), height: Math.abs(a.y-b.y) };
+}
+function pointInRect(p, r){
+  return p.x >= r.x && p.x <= r.x+r.width && p.y >= r.y && p.y <= r.y+r.height;
+}
+
+function renderMarquee(){
+  marqueeLayer.innerHTML = "";
+  if(!dragState || dragState.mode !== "marquee") return;
+  const r = rectFromPoints(dragState.start, dragState.current);
+  marqueeLayer.appendChild(el("rect", {
+    x:r.x, y:r.y, width:r.width, height:r.height,
+    fill:"var(--accent-tint)", opacity:0.25, stroke:"var(--accent)", "stroke-width":1, "stroke-dasharray":"4 3"
+  }));
+}
+
+// Everything whose representative point falls inside the rectangle.
+function entitiesInRect(rect){
+  const ids = [];
+  Object.values(state.scene.atoms).forEach(a => { if(pointInRect(a, rect)) ids.push({ kind:"atom", id:a.id }); });
+  Object.values(state.scene.texts).forEach(t => { if(pointInRect(t, rect)) ids.push({ kind:"text", id:t.id }); });
+  Object.values(state.scene.arrows).forEach(a => {
+    const mid = { x:(a.x1+a.x2)/2, y:(a.y1+a.y2)/2 };
+    if(pointInRect(mid, rect)) ids.push({ kind:"arrow", id:a.id });
+  });
+  return ids;
+}
+
+function selectGroup(ids){
+  if(ids.length === 0){ state.selection = null; renderAll(); return; }
+  if(ids.length === 1){ state.selection = ids[0]; renderAll(); announce((ids[0].kind[0].toUpperCase()+ids[0].kind.slice(1)) + " selected."); return; }
+  state.selection = { kind:"group", ids };
+  renderAll();
+  announce(ids.length + " items selected. Drag any of them, or use arrow keys, to move the group together.");
+}
+
 /* =========================================================================
    9. PROPERTIES PANEL
    ========================================================================= */
@@ -1410,14 +1465,37 @@ function renderProperties(){
   const body = $("#properties-body");
   body.innerHTML = "";
   if(!state.selection){
-    body.innerHTML = '<p class="empty-note">Nothing selected. Choose the Select tool and click an atom, bond, arrow, or text label to edit it here.</p>';
+    body.innerHTML = '<p class="empty-note">Nothing selected. Choose the Select tool and click an atom, bond, arrow, or text label to edit it here. Drag across empty canvas to select several at once.</p>';
     return;
   }
+  if(state.selection.kind === "group"){ renderGroupProps(body, state.selection.ids); return; }
   const { kind, id } = state.selection;
   if(kind === "atom") renderAtomProps(body, state.scene.atoms[id]);
   else if(kind === "bond") renderBondProps(body, state.scene.bonds[id]);
   else if(kind === "arrow") renderArrowProps(body, state.scene.arrows[id]);
   else if(kind === "text") renderTextProps(body, state.scene.texts[id]);
+}
+
+function renderGroupProps(body, ids){
+  const counts = {};
+  ids.forEach(e => { counts[e.kind] = (counts[e.kind]||0) + 1; });
+  const parts = Object.keys(counts).map(k => counts[k] + " " + k + (counts[k]>1 ? "s" : ""));
+  const info = document.createElement("p"); info.className = "empty-note";
+  info.textContent = ids.length + " items selected (" + parts.join(", ") + "). Drag any of them, or use the arrow keys, to move the whole group together.";
+  body.appendChild(info);
+
+  const actions = document.createElement("div"); actions.className = "prop-actions";
+  const btn = document.createElement("button");
+  btn.textContent = "Delete all";
+  btn.addEventListener("click", () => {
+    ids.forEach(e => deleteEntity(e.kind, e.id));
+    state.selection = null;
+    pushHistory();
+    renderAll();
+    announce("Deleted " + ids.length + " items.");
+  });
+  actions.appendChild(btn);
+  body.appendChild(actions);
 }
 
 function field(labelText, inputEl){
@@ -1668,7 +1746,7 @@ function resetZoom(){
    14. TOOL / UI STATE
    ========================================================================= */
 const TOOL_DESCRIPTIONS = {
-  select: "click an item to select and drag to move it.",
+  select: "click an item to select and drag to move it, or drag across empty space to select a group.",
   atom: "click the canvas to place an atom of the selected element. Stays active for placing several in a row.",
   bond: "drag from an atom to draw a bond; click an existing bond to cycle its type. Stays active for a whole chain.",
   text: "click the canvas to add a text label, then switches to Select so you can type into it.",
@@ -1723,12 +1801,25 @@ svg.addEventListener("pointerdown", (e) => {
     return;
   }
 
+  if(e.shiftKey){
+    svg.focus();
+    state.keyboardCursor = snapToGrid(world);
+    renderKeyboardCursor();
+    announce("Keyboard cursor moved here.");
+    return;
+  }
+
   if(state.tool === "select"){
     const hit = findEntityNear(world);
+    if(hit && isEntitySelected(hit.kind, hit.id) && groupIds().length > 0){
+      dragState = { mode:"move-group", start:{...world} };
+      return;
+    }
     selectEntity(hit ? hit.kind : null, hit ? hit.id : null);
     if(hit && hit.kind === "atom") dragState = { mode:"move-atom", id: hit.id };
     else if(hit && hit.kind === "text") dragState = { mode:"move-text", id: hit.id };
     else if(hit && hit.kind === "arrow") dragState = { mode:"move-arrow", id: hit.id, start:{...world} };
+    else dragState = { mode:"marquee", start:{...world}, current:{...world} };
     return;
   }
 
@@ -1791,6 +1882,22 @@ svg.addEventListener("pointermove", (e) => {
   if(dragState.mode === "move-atom"){
     const atom = state.scene.atoms[dragState.id];
     if(atom){ const p = snapToGrid(world); atom.x = p.x; atom.y = p.y; renderEntities(); }
+    return;
+  }
+  if(dragState.mode === "marquee"){
+    dragState.current = world;
+    renderMarquee();
+    return;
+  }
+  if(dragState.mode === "move-group"){
+    const dx = world.x - dragState.start.x, dy = world.y - dragState.start.y;
+    groupIds().forEach(e => {
+      if(e.kind === "atom"){ const a = state.scene.atoms[e.id]; if(a){ a.x += dx; a.y += dy; } }
+      else if(e.kind === "text"){ const t = state.scene.texts[e.id]; if(t){ t.x += dx; t.y += dy; } }
+      else if(e.kind === "arrow"){ const ar = state.scene.arrows[e.id]; if(ar){ ar.x1+=dx; ar.y1+=dy; ar.x2+=dx; ar.y2+=dy; } }
+    });
+    dragState.start = world;
+    renderEntities();
     return;
   }
   if(dragState.mode === "move-text"){
@@ -1856,6 +1963,13 @@ function endPointerInteraction(e){
       state.bondDraft = null;
       renderEntities();
     }
+  } else if(dragState.mode === "marquee"){
+    const rect = rectFromPoints(dragState.start, dragState.current);
+    const found = entitiesInRect(rect);
+    dragState = null;
+    marqueeLayer.innerHTML = "";
+    selectGroup(found);
+    return;
   } else if(dragState.mode.startsWith("move-")){
     pushHistory();
   }
@@ -1913,6 +2027,7 @@ svg.addEventListener("keydown", (e) => {
       state.bondDraft = null;
       dragState = null;
       svg.classList.remove("panning");
+      marqueeLayer.innerHTML = "";
       renderEntities();
       announce("Cancelled.");
     }
@@ -1921,6 +2036,16 @@ svg.addEventListener("keydown", (e) => {
   }
 
   if(e.key === "Delete" || e.key === "Backspace"){
+    if(state.selection && state.selection.kind === "group"){
+      e.preventDefault();
+      const n = state.selection.ids.length;
+      state.selection.ids.forEach(entry => deleteEntity(entry.kind, entry.id));
+      state.selection = null;
+      pushHistory();
+      renderAll();
+      announce("Deleted " + n + " items.");
+      return;
+    }
     if(state.selection){
       e.preventDefault();
       deleteEntity(state.selection.kind, state.selection.id);
@@ -1936,6 +2061,16 @@ svg.addEventListener("keydown", (e) => {
 
 function moveSelectionBy(dx, dy){
   if(!state.selection) return false;
+  if(state.selection.kind === "group"){
+    let moved = false;
+    groupIds().forEach(e => {
+      if(e.kind === "atom"){ const a = state.scene.atoms[e.id]; if(a){ a.x+=dx; a.y+=dy; moved = true; } }
+      else if(e.kind === "text"){ const t = state.scene.texts[e.id]; if(t){ t.x+=dx; t.y+=dy; moved = true; } }
+      else if(e.kind === "arrow"){ const a = state.scene.arrows[e.id]; if(a){ a.x1+=dx; a.y1+=dy; a.x2+=dx; a.y2+=dy; moved = true; } }
+    });
+    if(moved) scheduleHistoryPush();
+    return moved;
+  }
   const { kind, id } = state.selection;
   let obj = kind === "atom" ? state.scene.atoms[id] : kind === "text" ? state.scene.texts[id] : null;
   if(obj){ obj.x += dx; obj.y += dy; scheduleHistoryPush(); return true; }
