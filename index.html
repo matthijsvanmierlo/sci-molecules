@@ -158,8 +158,7 @@
 
   /* ---------- Canvas ---------- */
   .canvas-wrap{ position:relative; background:var(--bg-app); overflow:hidden; }
-  #scene-svg{ width:100%; height:100%; display:block; background:var(--paper); cursor:crosshair; touch-action:none; user-select:none; -webkit-user-select:none; -webkit-touch-callout:none; }
-  #scene-svg text{ user-select:none; -webkit-user-select:none; }
+  #scene-svg{ width:100%; height:100%; display:block; background:var(--paper); cursor:crosshair; touch-action:none; }
   #scene-svg.tool-select{ cursor:default; }
   #scene-svg.tool-erase{ cursor:not-allowed; }
   #scene-svg.pan-mode{ cursor:grab; }
@@ -209,6 +208,30 @@
 
   select#style-preset, select#font-scale{ width:100%; }
 
+  .bond-type-grid{
+    display:grid; grid-template-columns:repeat(5, 1fr); gap:3px; margin-top:6px;
+  }
+  .bond-type-grid button{
+    padding:5px 0; font-size:11px; text-align:center; font-family:var(--font-mono);
+  }
+  .formula-card{
+    background:var(--panel-bg); border:1px solid var(--panel-border);
+    border-radius:var(--radius); padding:8px 10px; margin-bottom:10px;
+    display:flex; justify-content:space-between; align-items:center;
+  }
+  .formula-card .lbl{
+    font-size:10px; text-transform:uppercase; letter-spacing:.06em; color:var(--text-dim); margin-bottom:2px;
+  }
+  .formula-card .f-val{
+    font-family:var(--font-mono); font-size:15px; font-weight:600; color:var(--focus);
+  }
+  .formula-card .mw-val{
+    font-family:var(--font-mono); font-size:12px; color:var(--text-light); text-align:right;
+  }
+  .marquee-box{
+    fill:rgba(127,217,190,0.12); stroke:var(--focus); stroke-width:1.5; stroke-dasharray:4 3; pointer-events:none;
+  }
+
   /* ---------- Footer ---------- */
   footer.statusbar{
     display:flex; align-items:center; gap:16px; padding:6px 14px;
@@ -248,6 +271,8 @@
     <div class="divider"></div>
     <div class="btn-row" role="group" aria-label="Document">
       <button id="btn-new-doc">New</button>
+      <button id="btn-clear-canvas" title="Clear all drawn items">Clear</button>
+      <button id="btn-clean-2d" title="Standardize bond lengths and clean angles">Clean 2D</button>
     </div>
     <div class="spacer"></div>
     <span class="save-indicator" id="save-indicator" aria-hidden="true">&nbsp;</span>
@@ -261,6 +286,13 @@
           <button data-tool="select" aria-pressed="true">&#8598; Select <kbd>V</kbd></button>
           <button data-tool="atom" aria-pressed="false">&#9679; Atom <kbd>A</kbd></button>
           <button data-tool="bond" aria-pressed="false">&#9585; Bond <kbd>B</kbd></button>
+          <div class="bond-type-grid" id="bond-type-bar" role="group" aria-label="Bond type">
+            <button data-bond-type="1" aria-pressed="true" title="Single bond (1)">&mdash;</button>
+            <button data-bond-type="2" aria-pressed="false" title="Double bond (2)">=</button>
+            <button data-bond-type="3" aria-pressed="false" title="Triple bond (3)">&equiv;</button>
+            <button data-bond-type="WEDGE" aria-pressed="false" title="Wedge bond (W)">&#9650;</button>
+            <button data-bond-type="HASH" aria-pressed="false" title="Hash bond (H)">&#8783;</button>
+          </div>
           <button data-tool="text" aria-pressed="false">Aa Text <kbd>T</kbd></button>
           <button data-tool="erase" aria-pressed="false">&#10005; Erase <kbd>E</kbd></button>
         </div>
@@ -300,25 +332,13 @@
 
       <div class="tool-group">
         <h2>Templates</h2>
-        <div class="field">
-          <label for="template-select">Common compound</label>
-          <select id="template-select"></select>
-        </div>
         <div class="tool-list">
-          <button id="tpl-insert">Insert template</button>
+          <button id="tpl-benzene">Benzene ring</button>
+          <button id="tpl-cyclohexane">Cyclohexane (6)</button>
+          <button id="tpl-cyclopentane">Cyclopentane (5)</button>
+          <button id="tpl-cyclopropane">Cyclopropane (3)</button>
+          <button id="tpl-glycine">Glycine</button>
         </div>
-      </div>
-
-      <div class="tool-group">
-        <h2>Import SMILES</h2>
-        <div class="field">
-          <label for="smiles-input">Paste notation</label>
-          <input id="smiles-input" type="text" placeholder="e.g. CC(=O)Oc1ccccc1C(=O)O" autocomplete="off" spellcheck="false" />
-        </div>
-        <div class="tool-list">
-          <button id="smiles-insert">Import structure</button>
-        </div>
-        <p class="empty-note" id="smiles-error" role="alert"></p>
       </div>
     </nav>
 
@@ -337,7 +357,6 @@
           <rect id="grid-bg" x="-4000" y="-4000" width="8000" height="8000" fill="url(#grid-pattern)"></rect>
           <g id="entities-layer"></g>
           <g id="keyboard-cursor-layer"></g>
-          <g id="marquee-layer"></g>
         </g>
       </svg>
       <p id="canvas-instructions" class="sr-only">
@@ -345,9 +364,8 @@
         or use the keyboard: arrow keys move a keyboard cursor in grid steps, Enter performs the active tool's
         action at the cursor, Escape cancels an in-progress bond or arrow, Delete removes the selected item.
         Open Structure summary in the right-hand panel for a full text description of the current molecule.
-        With the Select tool, drag across empty canvas to select several items as a group, and shift-click anywhere to jump the keyboard cursor to that spot.
       </p>
-      <div class="hint-toast" id="hint-toast" role="note">Tool: <strong id="hint-tool-name">Select</strong> &mdash; <span id="hint-tool-desc">click an item to select and drag to move it, or drag across empty space to select a group.</span></div>
+      <div class="hint-toast" id="hint-toast" role="note">Tool: <strong id="hint-tool-name">Select</strong> &mdash; <span id="hint-tool-desc">click an item to select and drag to move it.</span></div>
       <div class="zoom-controls" role="group" aria-label="Zoom controls">
         <button id="zoom-in" aria-label="Zoom in">+</button>
         <button id="zoom-reset" aria-label="Reset zoom to fit">&#9723;</button>
@@ -402,16 +420,12 @@
         <summary>Keyboard shortcuts &amp; help</summary>
         <div class="details-body">
           <p><kbd>V</kbd> select &nbsp;<kbd>A</kbd> atom &nbsp;<kbd>B</kbd> bond &nbsp;<kbd>T</kbd> text &nbsp;<kbd>E</kbd> erase &nbsp;<kbd>R</kbd> arrow</p>
-          <p><kbd>C N O S P F H</kbd> switch to the Atom tool with that element from anywhere &mdash; or, if you have an atom selected with the Select tool, relabel it instantly instead.</p>
+          <p><kbd>C N O S P F H B</kbd> pick element while Atom tool is active</p>
           <p><kbd>Ctrl/Cmd+Z</kbd> undo &nbsp;<kbd>Ctrl/Cmd+Shift+Z</kbd> redo</p>
           <p><kbd>Delete</kbd> remove selection &nbsp;<kbd>Arrows</kbd> nudge selection or move keyboard cursor</p>
           <p><kbd>Enter</kbd> perform active tool at keyboard cursor &nbsp;<kbd>Esc</kbd> cancel</p>
           <p>Click an existing bond with the Bond tool to cycle single &rarr; double &rarr; triple &rarr; wedge &rarr; hash.</p>
           <p>Mouse wheel zooms toward the pointer. Hold <kbd>Space</kbd> and drag, or drag with the middle mouse button, to pan.</p>
-          <p>With the Select tool, drag across empty canvas to draw a selection box; everything inside becomes one group you can drag, nudge with arrow keys, or delete together.</p>
-          <p>Shift+click anywhere on the canvas to jump the keyboard cursor straight to that spot, instead of stepping it there with the arrow keys.</p>
-          <p>The Atom, Bond, and Erase tools stay active so you can place, chain, or clear several things in a row; Text and the reaction arrows switch back to Select after one, since you'll usually want to type or edit right away.</p>
-          <p>Templates and pasted SMILES both insert at the keyboard cursor's position, then hand control to the Select tool so you can drag the result into place.</p>
         </div>
       </details>
     </aside>
@@ -433,22 +447,27 @@
    1. CONFIGURATION
    ========================================================================= */
 const STYLE_PRESETS = {
-  ACS_1996:  { bondLength:40, bondSpacing:0.18, bondWidth:1.6, boldWidth:5.5, hashCount:6, fontSize:15, arrowHead:11 },
-  NATURE:    { bondLength:38, bondSpacing:0.20, bondWidth:1.8, boldWidth:6.0, hashCount:6, fontSize:14, arrowHead:10 },
-  RSC:       { bondLength:42, bondSpacing:0.16, bondWidth:1.5, boldWidth:5.0, hashCount:7, fontSize:15, arrowHead:11 }
+  ACS_1996:  { bondLength:48, bondSpacing:0.18, bondWidth:1.6, boldWidth:5.5, hashCount:6, fontSize:15, arrowHead:11 },
+  NATURE:    { bondLength:45, bondSpacing:0.20, bondWidth:1.8, boldWidth:6.0, hashCount:6, fontSize:14, arrowHead:10 },
+  RSC:       { bondLength:50, bondSpacing:0.16, bondWidth:1.5, boldWidth:5.0, hashCount:7, fontSize:15, arrowHead:11 }
 };
 
-// Standard valence table. Each entry lists the accepted total-bond-order values for
-// that element (covering common higher-valence forms: sulfoxides/sulfones for S,
-// phosphates for P, nitro/ammonium for N, hypervalent iodine). null = no check
-// (metals, too variable to police usefully).
+// Standard valence table. Entries mapped to null are treated as "no check" (metals, variable valence).
 const VALENCE = {
-  H:[1], C:[4], N:[3,5], O:[2], F:[1], Cl:[1], Br:[1], I:[1,3,5], S:[2,4,6], P:[3,5],
-  B:[3], Si:[4], Se:[2,4,6], Na:[1], K:[1], Li:[1], Mg:[2], Zn:[2], Cu:[1,2],
-  Fe:null, Pd:null, Pt:null
+  H:1, C:4, N:3, O:2, F:1, Cl:1, Br:1, I:1, S:2, P:3, B:3, Si:4, Se:2,
+  Na:1, K:1, Li:1, Mg:2, Zn:2, Cu:2, Fe:null, Pd:null, Pt:null
 };
 
-const MERGE_RADIUS = 12;      // px in world units, snapping a bond endpoint onto an existing atom
+const ATOMIC_MASS = {
+  H: 1.008, C: 12.011, N: 14.007, O: 15.999, F: 18.998,
+  Na: 22.990, Mg: 24.305, Si: 28.085, P: 30.974, S: 32.06,
+  Cl: 35.45, K: 39.098, Ca: 40.078, Br: 79.904, I: 126.904,
+  B: 10.81, Li: 6.94, Fe: 55.845, Zn: 65.38, Cu: 63.546,
+  Se: 78.971, Pd: 106.42, Pt: 195.08
+};
+
+const MERGE_RADIUS = 26;      // px in world units, snapping onto an existing atom
+const CONNECT_SNAP_RADIUS = 26; // generous radius for connecting molecules
 const GRID_STEP = 20;         // world units for grid-snap & keyboard cursor steps
 const ANGLE_SNAP_RAD = Math.PI / 12; // 15 degrees
 const HISTORY_LIMIT = 120;
@@ -473,8 +492,11 @@ function emptyScene(){
 
 const state = {
   scene: emptyScene(),
-  selection: null,        // {kind:'atom'|'bond'|'arrow'|'text', id}
+  selection: null,        // {kind:'atom'|'bond'|'arrow'|'text'|'group', id}
+  selectedAtoms: new Set(),
+  selectedBonds: new Set(),
   tool: "select",
+  bondType: "1",          // "1", "2", "3", "WEDGE", "HASH"
   currentElement: "C",
   pan: { x: 60, y: 60 },
   zoom: 1,
@@ -484,7 +506,8 @@ const state = {
   keyboardCursor: { x: 500, y: 340 },
   spaceHeld: false,
   panning: false,
-  bondDraft: null,        // {startAtomId, x, y} while dragging/keying a bond or arrow
+  bondDraft: null,        // {startAtomId, x, y, snapAtomId} while dragging/keying a bond
+  marqueeDraft: null,     // {startX, startY, currentX, currentY} while marquee selecting
   history: [],
   historyIndex: -1,
   lastErrorAtomIds: new Set()
@@ -518,10 +541,11 @@ function perpendicular(dx, dy){
 
 // Approximate a labeled atom's text bounding box in world units, for bond clipping.
 function atomLabelBox(atom){
-  const label = atomLabelText(atom);
-  if(!label) return null;
+  const valence = atomValenceInfo(atom);
+  const text = formatAtomDisplay(atom, valence);
+  if(!text) return null;
   const fs = currentStyle().fontSize;
-  const w = Math.max(label.length * fs * 0.62, fs * 0.9);
+  const w = Math.max(text.length * fs * 0.62, fs * 0.9);
   const h = fs * 1.15;
   return { x: atom.x - w/2, y: atom.y - h/2, width: w, height: h };
 }
@@ -559,31 +583,54 @@ function bondsOfAtom(atomId){
 }
 
 function atomLabelText(atom){
-  // Skeletal convention: unlabeled plain-carbon vertices render as just a line joint.
-  if(atom.element === "C" && atom.charge === 0 && !atom.isotope) return null;
+  // Skeletal convention:
+  // If plain-carbon has NO bonds, it must display as CH4 (or CH3+, etc.)
+  if(atom.element === "C"){
+    if(bondsOfAtom(atom.id).length === 0) return "C";
+    if(atom.charge === 0 && !atom.isotope) return null;
+  }
   return atom.element;
 }
 
-// hCount is "the H count to show": explicit if the atom carries one (e.g. from a
-// SMILES bracket atom like [nH]), otherwise inferred from the smallest accepted
-// valence that fits the existing bonds.
+function formatAtomDisplay(atom, valence){
+  const label = atomLabelText(atom);
+  if(!label) return null;
+  const numH = (valence && valence.checked && valence.implicitH > 0) ? valence.implicitH : 0;
+  const hStr = numH > 0 ? ("H" + (numH > 1 ? subDigits(numH) : "")) : "";
+  const chgStr = chargeSuperscript(atom.charge);
+
+  const bonds = bondsOfAtom(atom.id);
+  // Isolated atoms
+  if(bonds.length === 0){
+    if(atom.element === "C"){
+      return "C" + hStr + chgStr; // "CH₄" when neutral!
+    }
+    if(atom.element === "O" && numH === 2 && atom.charge === 0) return "H₂O";
+    if(atom.element === "S" && numH === 2 && atom.charge === 0) return "H₂S";
+    if(atom.element === "Se" && numH === 2 && atom.charge === 0) return "H₂Se";
+    return label + hStr + chgStr;
+  }
+
+  // Bonded: if bonds point primarily rightwards, place H on left (e.g. HO-, H2N-)
+  const avgBondDx = bonds.reduce((sum, b) => {
+    const other = state.scene.atoms[b.a1 === atom.id ? b.a2 : b.a1];
+    return sum + (other ? (other.x - atom.x) : 0);
+  }, 0);
+
+  if(avgBondDx > 8 && hStr && atom.element !== "C"){
+    return hStr + label + chgStr;
+  }
+  return label + hStr + chgStr;
+}
+
 function atomValenceInfo(atom){
-  const options = VALENCE[atom.element];
+  const base = VALENCE[atom.element];
   const bonds = bondsOfAtom(atom.id);
   const bondOrderSum = bonds.reduce((s, b) => s + (b.order || 1), 0);
-  if(options == null) return { checked:false, hCount:0, overfilled:false, bondOrderSum };
-
-  if(atom.explicitH != null){
-    const used = bondOrderSum + atom.explicitH;
-    const fits = options.some(v => used <= v - atom.charge);
-    return { checked:true, hCount: atom.explicitH, overfilled: !fits, bondOrderSum };
-  }
-  for(const opt of options){
-    const effective = opt - atom.charge;
-    if(bondOrderSum <= effective) return { checked:true, hCount: effective - bondOrderSum, overfilled:false, bondOrderSum, effective };
-  }
-  const maxEffective = Math.max(...options.map(o => o - atom.charge));
-  return { checked:true, hCount:0, overfilled:true, bondOrderSum, effective:maxEffective };
+  if(base == null) return { checked:false, implicitH:0, overfilled:false };
+  const effective = base - atom.charge;
+  const implicitH = effective - bondOrderSum;
+  return { checked:true, implicitH: Math.max(0, implicitH), overfilled: implicitH < 0, bondOrderSum, effective };
 }
 
 function chargeSuperscript(charge){
@@ -593,437 +640,66 @@ function chargeSuperscript(charge){
   return (n > 1 ? String(n) : "") + sign;
 }
 
-/* =========================================================================
-   4B. SMILES IMPORT ENGINE
-   A small parser (organic subset + bracket atoms + rings + branches),
-   ring-aware Kekule assignment, and a deterministic 2D layout with a light
-   relaxation pass. This is a simplified depiction engine, not a full
-   cheminformatics toolkit: no true aromaticity perception beyond simple
-   Kekule alternation, no stereochemistry from @/@@, and layout quality on
-   large fused/bridged systems is best-effort (the result stays fully
-   editable afterward, same as anything else drawn on the canvas).
-   ========================================================================= */
-const KNOWN_ELEMENTS = new Set([
-  "H","He","Li","Be","B","C","N","O","F","Ne","Na","Mg","Al","Si","P","S","Cl","Ar",
-  "K","Ca","Sc","Ti","V","Cr","Mn","Fe","Co","Ni","Cu","Zn","Ga","Ge","As","Se","Br","Kr",
-  "Rb","Sr","Y","Zr","Nb","Mo","Tc","Ru","Rh","Pd","Ag","Cd","In","Sn","Sb","Te","I","Xe",
-  "Cs","Ba","La","Ce","Pr","Nd","Pm","Sm","Eu","Gd","Tb","Dy","Ho","Er","Tm","Yb","Lu",
-  "Hf","Ta","W","Re","Os","Ir","Pt","Au","Hg","Tl","Pb","Bi","Po","At","Rn"
-]);
-const ORGANIC_SUBSET = new Set(["B","C","N","O","P","S","F","I","Cl","Br"]);
-const AROMATIC_VALENCE_OPTIONS = { C:[4], N:[3,5], O:[2], S:[2,4,6], P:[3,5], B:[3] };
-let SMILES_BOND_LENGTH = 40; // set from the active style preset just before each import
+function calculateMolecularSummary(){
+  const counts = {};
+  let totalMass = 0;
 
-function parseSmilesString(smiles){
-  smiles = smiles.trim();
-  let i = 0;
-  const atoms = [];
-  const bonds = [];
-  const stack = [];
-  let prev = -1;
-  let pendingBond = null;
-  const ringMap = {};
+  Object.values(state.scene.atoms).forEach(atom => {
+    const el = atom.element;
+    counts[el] = (counts[el] || 0) + 1;
+    totalMass += (ATOMIC_MASS[el] || 0);
 
-  function newAtom(element, aromatic, charge, hcount, isotope){
-    const idx = atoms.length;
-    atoms.push({ element, aromatic: !!aromatic, charge: charge||0, hcount: (hcount==null?null:hcount), isotope: isotope||null });
-    if(prev !== -1){
-      const order = pendingBond || 1;
-      bonds.push({ a: prev, b: idx, order, ringClosure:false });
-    }
-    pendingBond = null;
-    prev = idx;
-    return idx;
-  }
-
-  function handleRingDigit(key){
-    if(ringMap[key] != null){
-      const other = ringMap[key];
-      const order = pendingBond || other.order || 1;
-      bonds.push({ a: other.atomIdx, b: prev, order, ringClosure:true });
-      delete ringMap[key];
-      pendingBond = null;
-    } else {
-      ringMap[key] = { atomIdx: prev, order: pendingBond };
-      pendingBond = null;
-    }
-  }
-
-  function parseBracketAtom(content){
-    let j = 0;
-    let isotope = null;
-    const isoMatch = /^(\d+)/.exec(content);
-    if(isoMatch){ isotope = parseInt(isoMatch[1],10); j += isoMatch[1].length; }
-    let element = null, aromatic = false;
-    const twoLetterMatch = /^(Cl|Br|Si|Se|Na|Mg|Zn|Cu|Fe|Pd|Pt|Li)/.exec(content.slice(j));
-    if(twoLetterMatch){ element = twoLetterMatch[1]; j += element.length; }
-    else {
-      const c = content[j];
-      if(c && /[a-z]/.test(c)){ element = c.toUpperCase(); aromatic = true; j++; }
-      else if(c && /[A-Z]/.test(c)){ element = c; j++; }
-      else throw new Error("Invalid bracket atom: [" + content + "]");
-    }
-    if(content[j] === "@"){ j++; if(content[j] === "@") j++; }
-    let hcount = 0;
-    if(content[j] === "H"){
-      j++;
-      const m = /^(\d*)/.exec(content.slice(j));
-      hcount = m[1] ? parseInt(m[1],10) : 1;
-      j += m[1].length;
-    }
-    let charge = 0;
-    if(content[j] === "+" || content[j] === "-"){
-      const sign = content[j] === "+" ? 1 : -1;
-      const signChar = content[j];
-      j++;
-      if(content[j] === signChar){
-        let count = 1;
-        while(content[j] === signChar){ count++; j++; }
-        charge = sign * count;
-      } else {
-        const m = /^(\d*)/.exec(content.slice(j));
-        charge = sign * (m[1] ? parseInt(m[1],10) : 1);
-        j += m[1].length;
-      }
-    }
-    if(content[j] === ":"){ j++; const m = /^(\d*)/.exec(content.slice(j)); j += m[1].length; }
-    if(j !== content.length) throw new Error("Could not fully parse bracket atom [" + content + "]");
-    if(!KNOWN_ELEMENTS.has(element)) throw new Error('Unknown element "' + element + '" in [' + content + "]");
-    newAtom(element, aromatic, charge, hcount, isotope);
-  }
-
-  while(i < smiles.length){
-    const ch = smiles[i];
-    if(ch === "("){ stack.push(prev); i++; continue; }
-    if(ch === ")"){
-      if(stack.length === 0) throw new Error("Unbalanced ')' at position " + i);
-      prev = stack.pop(); i++; continue;
-    }
-    if(ch === "."){ prev = -1; pendingBond = null; i++; continue; }
-    if(ch === "-"){ pendingBond = 1; i++; continue; }
-    if(ch === "="){ pendingBond = 2; i++; continue; }
-    if(ch === "#"){ pendingBond = 3; i++; continue; }
-    if(ch === ":"){ pendingBond = 1; i++; continue; }
-    if(ch === "/" || ch === "\\"){ i++; continue; }
-    if(ch === "%"){
-      const numStr = smiles.substr(i+1, 2);
-      if(!/^\d\d$/.test(numStr)) throw new Error("Malformed ring closure at position " + i);
-      handleRingDigit("%" + numStr); i += 3; continue;
-    }
-    if(/[0-9]/.test(ch)){ handleRingDigit(ch); i++; continue; }
-    if(ch === "["){
-      const close = smiles.indexOf("]", i);
-      if(close === -1) throw new Error("Unclosed bracket atom at position " + i);
-      parseBracketAtom(smiles.slice(i+1, close));
-      i = close + 1;
-      continue;
-    }
-    let matchedTwo = false;
-    for(const sym of ["Cl","Br"]){
-      if(smiles.substr(i, sym.length) === sym){ newAtom(sym, false, 0, null, null); i += sym.length; matchedTwo = true; break; }
-    }
-    if(matchedTwo) continue;
-    if(/[A-Z]/.test(ch)){
-      if(!ORGANIC_SUBSET.has(ch)) throw new Error('Element "' + ch + '" must be written in brackets, e.g. [' + ch + ']');
-      newAtom(ch, false, 0, null, null); i++; continue;
-    }
-    if("bcnops".includes(ch)){ newAtom(ch.toUpperCase(), true, 0, null, null); i++; continue; }
-    throw new Error('Unexpected character "' + ch + '" at position ' + i);
-  }
-
-  if(pendingBond !== null) throw new Error("Dangling bond symbol at the end of the SMILES string.");
-  if(atoms.length === 0) throw new Error("No atoms found in SMILES.");
-  if(stack.length !== 0) throw new Error("Unclosed '(' in SMILES.");
-  if(Object.keys(ringMap).length !== 0) throw new Error("Unclosed ring bond number in SMILES.");
-
-  return { atoms, bonds };
-}
-
-// For each ring-closure bond, the shortest path between its two atoms using
-// every OTHER bond, plus the closure bond itself, is the smallest ring
-// through that bond. Works for simple rings and edge-fused systems alike
-// (naphthalene- and purine-like cores).
-function detectSmilesRings(atoms, bonds){
-  const adj = atoms.map(() => []);
-  bonds.forEach((b, bi) => { adj[b.a].push({ to: b.b, bi }); adj[b.b].push({ to: b.a, bi }); });
-  const rings = [];
-  bonds.forEach((b, bi) => {
-    if(!b.ringClosure) return;
-    const prevNode = new Array(atoms.length).fill(-1);
-    const visited = new Array(atoms.length).fill(false);
-    const queue = [b.a];
-    visited[b.a] = true;
-    while(queue.length){
-      const cur = queue.shift();
-      if(cur === b.b) break;
-      for(const edge of adj[cur]){
-        if(edge.bi === bi) continue;
-        if(!visited[edge.to]){ visited[edge.to] = true; prevNode[edge.to] = cur; queue.push(edge.to); }
-      }
-    }
-    if(!visited[b.b]) return;
-    const path = [];
-    let cur = b.b;
-    while(cur !== -1){ path.push(cur); if(cur === b.a) break; cur = prevNode[cur]; }
-    path.reverse();
-    if(path[0] === b.a) rings.push(path);
-  });
-  return rings;
-}
-
-function findSmilesBond(bonds, a, b){
-  return bonds.find(bd => (bd.a === a && bd.b === b) || (bd.a === b && bd.b === a));
-}
-
-function kekulizeSmilesRings(atoms, bonds, rings){
-  rings.forEach(ring => {
-    const n = ring.length;
-    const ringBonds = ring.map((ai, k) => findSmilesBond(bonds, ai, ring[(k+1)%n]));
-    const allAromatic = ring.every((ai, k) => ringBonds[k] && atoms[ai].aromatic && atoms[ring[(k+1)%n]].aromatic);
-    if(!allAromatic) return;
-    const ringBondSet = new Set(ringBonds);
-
-    function otherBondsSum(atomIdx){
-      let sum = 0;
-      bonds.forEach(bd => {
-        if(ringBondSet.has(bd)) return;
-        if(bd.a === atomIdx || bd.b === atomIdx) sum += bd.order;
-      });
-      return sum;
-    }
-    function isLocked(atomIdx){
-      const at = atoms[atomIdx];
-      const options = AROMATIC_VALENCE_OPTIONS[at.element];
-      if(!options) return false;
-      const already = otherBondsSum(atomIdx) + (at.hcount || 0);
-      let base = options[options.length - 1];
-      for(const opt of options){ if(opt - at.charge >= already + 2){ base = opt; break; } }
-      const capacity = (base - at.charge) - already;
-      return capacity <= 2;
-    }
-
-    const locked = ring.map(ai => isLocked(ai));
-    let expectDouble = true;
-    for(let k=0;k<n;k++){
-      const forced = locked[k] || locked[(k+1)%n];
-      if(forced){ ringBonds[k].order = 1; expectDouble = true; }
-      else { ringBonds[k].order = expectDouble ? 2 : 1; expectDouble = !expectDouble; }
+    const v = atomValenceInfo(atom);
+    if(v.checked && v.implicitH > 0){
+      counts["H"] = (counts["H"] || 0) + v.implicitH;
+      totalMass += v.implicitH * (ATOMIC_MASS["H"] || 1.008);
     }
   });
-}
 
-// Each atom gets an `arrival` angle (direction it was reached from) and a
-// `depth`. Chain atoms alternate +-60 degrees off the arrival angle for a
-// proper zigzag. Ring atoms get a radial "outward from ring centre" arrival
-// angle for their substituents. A collision search is the safety net.
-function layoutSmilesMolecule(atoms, bonds, rings){
-  const pos = atoms.map(() => null);
-  const arrival = atoms.map(() => 0);
-  const depth = atoms.map(() => 0);
-  const isRingAtom = atoms.map(() => false);
-  const placedRings = new Set();
-  const usedAngles = atoms.map(() => []);
-
-  function normalizeAngle(a){ while(a > Math.PI) a -= Math.PI*2; while(a < -Math.PI) a += Math.PI*2; return a; }
-  function angleFree(atomIdx, angle){ return !usedAngles[atomIdx].some(a => Math.abs(normalizeAngle(a-angle)) < 0.35); }
-  function claim(atomIdx, angle){ usedAngles[atomIdx].push(angle); }
-  function nextFreeAngle(atomIdx, preferred){
-    if(angleFree(atomIdx, preferred)) return preferred;
-    for(let step=1; step<=12; step++){
-      const delta = step * (Math.PI/12);
-      if(angleFree(atomIdx, preferred+delta)) return preferred+delta;
-      if(angleFree(atomIdx, preferred-delta)) return preferred-delta;
-    }
-    return preferred;
+  if(Object.keys(counts).length === 0){
+    return { formula: "No structure", mw: "" };
   }
 
-  const adj = atoms.map(() => []);
-  bonds.forEach(b => { adj[b.a].push(b.b); adj[b.b].push(b.a); });
-  const ringOf = atoms.map(() => null);
-  rings.forEach((ring, ri) => ring.forEach(ai => { if(ringOf[ai] === null) ringOf[ai] = []; ringOf[ai].push(ri); }));
+  // Hill System: C first, then H, then others alphabetically
+  const elements = Object.keys(counts);
+  const hillOrder = [];
+  if(counts["C"]){
+    hillOrder.push("C");
+    if(counts["H"]) hillOrder.push("H");
+  }
+  elements.filter(e => e !== "C" && (counts["C"] ? e !== "H" : true))
+          .sort()
+          .forEach(e => hillOrder.push(e));
 
-  function setRingArrivals(ring, center){
-    ring.forEach(ai => { isRingAtom[ai] = true; arrival[ai] = Math.atan2(pos[ai].y-center.y, pos[ai].x-center.x); });
-    const n = ring.length;
-    ring.forEach((ai, k) => {
-      const nbA = ring[(k-1+n)%n], nbB = ring[(k+1)%n];
-      claim(ai, Math.atan2(pos[nbA].y-pos[ai].y, pos[nbA].x-pos[ai].x));
-      claim(ai, Math.atan2(pos[nbB].y-pos[ai].y, pos[nbB].x-pos[ai].x));
+  let formulaStr = "";
+  hillOrder.forEach(e => {
+    const c = counts[e];
+    formulaStr += e + (c > 1 ? subDigits(c) : "");
+  });
+
+  return {
+    formula: formulaStr,
+    mw: totalMass > 0 ? (totalMass.toFixed(2) + " g/mol") : ""
+  };
+}
+
+function getConnectedComponent(startAtomId){
+  const visited = new Set();
+  const queue = [startAtomId];
+  visited.add(startAtomId);
+  const bondIds = new Set();
+  while(queue.length > 0){
+    const curr = queue.shift();
+    bondsOfAtom(curr).forEach(b => {
+      bondIds.add(b.id);
+      const neighbor = b.a1 === curr ? b.a2 : b.a1;
+      if(!visited.has(neighbor)){
+        visited.add(neighbor);
+        queue.push(neighbor);
+      }
     });
   }
-
-  function placeRingFromOneAtom(ringIdx, anchorAtom, incomingAngle){
-    const ring = rings[ringIdx];
-    const n = ring.length;
-    const startPos = pos[anchorAtom];
-    const apothem = SMILES_BOND_LENGTH / (2*Math.tan(Math.PI/n));
-    const R = SMILES_BOND_LENGTH / (2*Math.sin(Math.PI/n));
-    const center = { x: startPos.x + apothem*Math.cos(incomingAngle), y: startPos.y + apothem*Math.sin(incomingAngle) };
-    const startVecAngle = Math.atan2(startPos.y-center.y, startPos.x-center.x);
-    const rotIdx = ring.indexOf(anchorAtom);
-    const ordered = ring.slice(rotIdx).concat(ring.slice(0,rotIdx));
-    for(let k=0;k<n;k++){
-      const ai = ordered[k];
-      if(pos[ai]) continue;
-      const a = startVecAngle + (Math.PI*2/n)*k;
-      pos[ai] = { x: center.x + R*Math.cos(a), y: center.y + R*Math.sin(a) };
-      depth[ai] = depth[anchorAtom] + 1;
-    }
-    setRingArrivals(ring, center);
-    placedRings.add(ringIdx);
-  }
-
-  function placeRingFromSharedEdge(ringIdx, knownA, knownB){
-    const ring = rings[ringIdx];
-    const n = ring.length;
-    const A = pos[knownA], B = pos[knownB];
-    const mid = { x:(A.x+B.x)/2, y:(A.y+B.y)/2 };
-    const edgeAngle = Math.atan2(B.y-A.y, B.x-A.x);
-    const apothem = SMILES_BOND_LENGTH / (2*Math.tan(Math.PI/n));
-    const R = SMILES_BOND_LENGTH / (2*Math.sin(Math.PI/n));
-    const perp = { x:-Math.sin(edgeAngle), y:Math.cos(edgeAngle) };
-    const c1 = { x: mid.x+perp.x*apothem, y: mid.y+perp.y*apothem };
-    const c2 = { x: mid.x-perp.x*apothem, y: mid.y-perp.y*apothem };
-    const placedPts = pos.filter(Boolean);
-    const centroid = placedPts.reduce((s,p)=>({x:s.x+p.x,y:s.y+p.y}),{x:0,y:0});
-    centroid.x /= placedPts.length; centroid.y /= placedPts.length;
-    const center = (Math.hypot(c1.x-centroid.x,c1.y-centroid.y) >= Math.hypot(c2.x-centroid.x,c2.y-centroid.y)) ? c1 : c2;
-    const rotIdx = ring.indexOf(knownA);
-    const ordered = ring.slice(rotIdx).concat(ring.slice(0,rotIdx));
-    let seq = ordered;
-    if(ordered[1] !== knownB) seq = [ordered[0]].concat(ordered.slice(1).reverse());
-    const startVecAngle = Math.atan2(A.y-center.y, A.x-center.x);
-    const towardB = Math.atan2(B.y-center.y, B.x-center.x);
-    const stepDir = normalizeAngle(towardB - startVecAngle) >= 0 ? 1 : -1;
-    for(let k=0;k<n;k++){
-      const ai = seq[k];
-      if(pos[ai]) continue;
-      const a = startVecAngle + stepDir*(Math.PI*2/n)*k;
-      pos[ai] = { x: center.x + R*Math.cos(a), y: center.y + R*Math.sin(a) };
-      depth[ai] = Math.max(depth[knownA], depth[knownB]) + 1;
-    }
-    setRingArrivals(ring, center);
-    placedRings.add(ringIdx);
-  }
-
-  pos[0] = { x:0, y:0 };
-  arrival[0] = -Math.PI/2;
-  let queue = [0];
-  const inQueue = new Set([0]);
-  function enqueueRing(ring){ ring.forEach(ai => { if(!inQueue.has(ai)){ queue.push(ai); inQueue.add(ai); } }); }
-
-  while(queue.length){
-    const cur = queue.shift();
-    if(ringOf[cur]){
-      for(const ri of ringOf[cur]){
-        if(placedRings.has(ri)) continue;
-        const ring = rings[ri];
-        const placedInRing = ring.filter(ai => pos[ai]);
-        if(placedInRing.length >= 2){
-          const n = ring.length;
-          let done = false;
-          for(let k=0;k<n && !done;k++){
-            const a = ring[k], b = ring[(k+1)%n];
-            if(pos[a] && pos[b]){ placeRingFromSharedEdge(ri, a, b); done = true; }
-          }
-          if(!done) placeRingFromOneAtom(ri, cur, nextFreeAngle(cur, arrival[cur]));
-        } else if(placedInRing.length === 1){
-          placeRingFromOneAtom(ri, cur, nextFreeAngle(cur, arrival[cur]));
-        }
-        enqueueRing(ring);
-      }
-    }
-    let branchCount = 0;
-    for(const nb of adj[cur]){
-      if(pos[nb]) continue;
-      let preferred;
-      if(isRingAtom[cur]){
-        preferred = branchCount === 0 ? arrival[cur] : arrival[cur] + branchCount * (Math.PI/2.2);
-      } else if(branchCount === 0){
-        const turn = (depth[cur] % 2 === 0) ? (Math.PI/3) : (-Math.PI/3);
-        preferred = arrival[cur] + turn;
-      } else {
-        preferred = arrival[cur] + Math.PI + branchCount * (Math.PI/2.2) * (branchCount % 2 === 0 ? 1 : -1);
-      }
-      const angle = nextFreeAngle(cur, preferred);
-      pos[nb] = { x: pos[cur].x + SMILES_BOND_LENGTH*Math.cos(angle), y: pos[cur].y + SMILES_BOND_LENGTH*Math.sin(angle) };
-      arrival[nb] = angle;
-      depth[nb] = depth[cur] + 1;
-      claim(cur, angle);
-      claim(nb, angle + Math.PI);
-      branchCount++;
-      if(!inQueue.has(nb)){ queue.push(nb); inQueue.add(nb); }
-    }
-  }
-
-  let offsetX = 0;
-  pos.forEach((p, idx) => { if(!p){ offsetX += SMILES_BOND_LENGTH*2; pos[idx] = { x: offsetX, y: 0 }; } });
-  return pos;
-}
-
-function relaxSmilesLayout(bonds, pos, iterations){
-  const n = pos.length;
-  const bondedSet = new Set(bonds.map(b => (b.a<b.b ? b.a+","+b.b : b.b+","+b.a)));
-  const isBonded = (i,j) => bondedSet.has(i<j ? i+","+j : j+","+i);
-  const MIN_SEP = 30;
-  for(let it=0; it<iterations; it++){
-    for(let i=0;i<n;i++){
-      for(let j=i+1;j<n;j++){
-        if(isBonded(i,j)) continue;
-        const dx = pos[j].x-pos[i].x, dy = pos[j].y-pos[i].y;
-        let d = Math.hypot(dx,dy);
-        if(d < MIN_SEP){
-          if(d < 0.01) d = 0.01;
-          const push = (MIN_SEP-d)/2 * 0.5;
-          const ux = dx/d, uy = dy/d;
-          pos[i].x -= ux*push; pos[i].y -= uy*push;
-          pos[j].x += ux*push; pos[j].y += uy*push;
-        }
-      }
-    }
-    bonds.forEach(b => {
-      const dx = pos[b.b].x-pos[b.a].x, dy = pos[b.b].y-pos[b.a].y;
-      let d = Math.hypot(dx,dy); if(d < 0.01) d = 0.01;
-      const diff = (d-SMILES_BOND_LENGTH)/d * 0.15;
-      const ox = dx*diff, oy = dy*diff;
-      pos[b.a].x += ox; pos[b.a].y += oy;
-      pos[b.b].x -= ox; pos[b.b].y -= oy;
-    });
-  }
-}
-
-function moleculeFromSmiles(smiles){
-  SMILES_BOND_LENGTH = currentStyle().bondLength;
-  const { atoms, bonds } = parseSmilesString(smiles);
-  const rings = detectSmilesRings(atoms, bonds);
-  kekulizeSmilesRings(atoms, bonds, rings);
-  const positions = layoutSmilesMolecule(atoms, bonds, rings);
-  relaxSmilesLayout(bonds, positions, 40);
-  return { atoms, bonds, positions };
-}
-
-// Bridges the parser's plain atom/bond arrays into real scene entities, offset
-// so the molecule's centre lands at `center`. Returns the new atom ids.
-function insertParsedMolecule(parsed, center){
-  const xs = parsed.positions.map(p => p.x), ys = parsed.positions.map(p => p.y);
-  const cx = (Math.min(...xs) + Math.max(...xs)) / 2;
-  const cy = (Math.min(...ys) + Math.max(...ys)) / 2;
-  const dx = center.x - cx, dy = center.y - cy;
-  const newIds = parsed.atoms.map((a, idx) => createAtomAt(
-    { x: parsed.positions[idx].x + dx, y: parsed.positions[idx].y + dy },
-    a.element,
-    { charge: a.charge, isotope: a.isotope, explicitH: a.hcount }
-  ));
-  parsed.bonds.forEach(b => {
-    const id = uid("bond");
-    state.scene.bonds[id] = { id, a1: newIds[b.a], a2: newIds[b.b], order: b.order, stereo: "NONE" };
-  });
-  return newIds;
-}
-
-function insertSmiles(smiles, center){
-  const parsed = moleculeFromSmiles(smiles);
-  return insertParsedMolecule(parsed, center);
+  return { atoms: visited, bonds: bondIds };
 }
 
 /* =========================================================================
@@ -1107,16 +783,11 @@ async function loadOnStart(){
 /* =========================================================================
    7. SCENE MUTATIONS (used by both pointer and keyboard input paths)
    ========================================================================= */
-function createAtomAt(pos, element, overrides){
-  const id = uid("atom");
-  state.scene.atoms[id] = Object.assign(
-    { id, element: element, x: pos.x, y: pos.y, charge: 0, isotope: null, explicitH: null },
-    overrides || {}
-  );
-  return id;
-}
 function addAtom(pos, element){
-  return createAtomAt(snapToGrid(pos), element);
+  const p = snapToGrid(pos);
+  const id = uid("atom");
+  state.scene.atoms[id] = { id, element: element, x: p.x, y: p.y, charge: 0, isotope: null };
+  return id;
 }
 
 function findAtomNear(pos, radius){
@@ -1206,7 +877,6 @@ const svg = document.getElementById("scene-svg");
 const viewport = document.getElementById("viewport");
 const entitiesLayer = document.getElementById("entities-layer");
 const cursorLayer = document.getElementById("keyboard-cursor-layer");
-const marqueeLayer = document.getElementById("marquee-layer");
 const NS = "http://www.w3.org/2000/svg";
 
 function el(tag, attrs, children){
@@ -1223,23 +893,11 @@ function applyViewportTransform(){
 function renderAll(){
   renderEntities();
   renderKeyboardCursor();
-  renderMarquee();
   renderProperties();
   renderStructureSummary();
   applyViewportTransform();
   updateValenceReadout();
   updateHistoryButtons();
-}
-
-// True if (kind,id) is the lone selection, or a member of a group selection.
-function isEntitySelected(kind, id){
-  const sel = state.selection;
-  if(!sel) return false;
-  if(sel.kind === "group") return sel.ids.some(e => e.kind === kind && e.id === id);
-  return sel.kind === kind && sel.id === id;
-}
-function groupIds(){
-  return (state.selection && state.selection.kind === "group") ? state.selection.ids : [];
 }
 
 function bondEndpoints(bond){
@@ -1261,10 +919,9 @@ function renderEntities(){
     if(!ends) return;
     const { p1, p2 } = ends;
     const g = el("g", { "data-kind":"bond", "data-id": bond.id, tabindex:"-1" });
-    const isSel = isEntitySelected("bond", bond.id) ||
-      (isEntitySelected("atom", bond.a1) && isEntitySelected("atom", bond.a2));
+    const isSel = state.selectedBonds.has(bond.id) || (state.selection && state.selection.kind === "bond" && state.selection.id === bond.id);
     const stroke = isSel ? "var(--accent)" : "var(--ink)";
-    const sw = style.bondWidth * (isSel ? 1.4 : 1);
+    const sw = style.bondWidth * (isSel ? 1.6 : 1);
 
     if(bond.stereo === "WEDGE"){
       const perp = perpendicular(p2.x - p1.x, p2.y - p1.y);
@@ -1296,27 +953,24 @@ function renderEntities(){
       });
     }
     // wide invisible hit area for easier clicking/erasing
-    g.appendChild(el("line", { x1:p1.x, y1:p1.y, x2:p2.x, y2:p2.y, stroke:"transparent", "stroke-width": 14 }));
+    g.appendChild(el("line", { x1:p1.x, y1:p1.y, x2:p2.x, y2:p2.y, stroke:"transparent", "stroke-width": 16 }));
     entitiesLayer.appendChild(g);
   });
 
   // Atoms
   Object.values(state.scene.atoms).forEach(atom => {
     const g = el("g", { "data-kind":"atom", "data-id": atom.id });
-    const isSel = isEntitySelected("atom", atom.id);
+    const isSel = state.selectedAtoms.has(atom.id) || (state.selection && state.selection.kind === "atom" && state.selection.id === atom.id);
     const valence = atomValenceInfo(atom);
-    const label = atomLabelText(atom);
+    const text = formatAtomDisplay(atom, valence);
 
     if(valence.overfilled){
-      g.appendChild(el("circle", { cx:atom.x, cy:atom.y, r:14, fill:"none", stroke:"var(--warn)", "stroke-width":2.5 }));
+      g.appendChild(el("circle", { cx:atom.x, cy:atom.y, r:16, fill:"none", stroke:"var(--warn)", "stroke-width":2.5 }));
     }
     if(isSel){
-      g.appendChild(el("circle", { cx:atom.x, cy:atom.y, r:11, fill:"var(--accent-tint)", opacity:0.55 }));
+      g.appendChild(el("circle", { cx:atom.x, cy:atom.y, r:14, fill:"var(--accent-tint)", opacity:0.55, stroke:"var(--accent)", "stroke-width":1.5 }));
     }
-    if(label){
-      let text = label;
-      if(valence.checked && valence.hCount > 0) text += "H" + (valence.hCount > 1 ? subDigits(valence.hCount) : "");
-      text += chargeSuperscript(atom.charge);
+    if(text){
       const t = el("text", {
         x:atom.x, y:atom.y, "text-anchor":"middle", "dominant-baseline":"central",
         "font-family":"var(--font-mono)", "font-size": style.fontSize, fill:"var(--ink)", "font-weight":600
@@ -1328,7 +982,7 @@ function renderEntities(){
       g.appendChild(t);
     } else {
       // invisible hit target for plain vertex atoms
-      g.appendChild(el("circle", { cx:atom.x, cy:atom.y, r:9, fill: isSel ? "none" : "transparent" }));
+      g.appendChild(el("circle", { cx:atom.x, cy:atom.y, r:12, fill: isSel ? "none" : "transparent" }));
     }
     entitiesLayer.appendChild(g);
   });
@@ -1338,7 +992,7 @@ function renderEntities(){
 
   // Text annotations
   Object.values(state.scene.texts).forEach(t => {
-    const isSel = isEntitySelected("text", t.id);
+    const isSel = state.selection && state.selection.kind === "text" && state.selection.id === t.id;
     const g = el("g", { "data-kind":"text", "data-id": t.id });
     if(isSel) g.appendChild(el("rect", { x:t.x-4, y:t.y-t.fontSizePt, width: Math.max(t.text.length*t.fontSizePt*0.55,20)+8, height:t.fontSizePt*1.4, fill:"var(--accent-tint)", opacity:.5 }));
     const el2 = el("text", { x:t.x, y:t.y, "font-family":"var(--font-sans)", "font-size":t.fontSizePt, "font-weight": t.isBold ? 700 : 400, fill:"var(--ink)" });
@@ -1350,9 +1004,44 @@ function renderEntities(){
   // In-progress bond/arrow draft preview
   if(state.bondDraft){
     const from = state.scene.atoms[state.bondDraft.startAtomId] || state.bondDraft.startPoint;
-    entitiesLayer.appendChild(el("line", {
-      x1: from.x, y1: from.y, x2: state.bondDraft.x, y2: state.bondDraft.y,
-      stroke:"var(--accent)", "stroke-width":2, "stroke-dasharray":"5 4"
+    if(from){
+      entitiesLayer.appendChild(el("line", {
+        x1: from.x, y1: from.y, x2: state.bondDraft.x, y2: state.bondDraft.y,
+        stroke:"var(--accent)", "stroke-width":2.5, "stroke-dasharray":"5 4"
+      }));
+      entitiesLayer.appendChild(el("circle", {
+        cx: state.bondDraft.x, cy: state.bondDraft.y, r: 4,
+        fill:"var(--accent)"
+      }));
+    }
+    // Snap target highlight
+    if(state.bondDraft.snapAtomId){
+      const snapAtom = state.scene.atoms[state.bondDraft.snapAtomId];
+      if(snapAtom){
+        entitiesLayer.appendChild(el("circle", {
+          cx: snapAtom.x, cy: snapAtom.y, r: 20,
+          fill: "var(--accent-tint)", opacity: 0.5,
+          stroke: "var(--focus)", "stroke-width": 2.5,
+          "stroke-dasharray": "4 2"
+        }));
+        entitiesLayer.appendChild(el("circle", {
+          cx: snapAtom.x, cy: snapAtom.y, r: 6,
+          fill: "var(--focus)"
+        }));
+      }
+    }
+  }
+
+  // Marquee box preview
+  if(state.marqueeDraft){
+    const m = state.marqueeDraft;
+    const x = Math.min(m.startX, m.currentX);
+    const y = Math.min(m.startY, m.currentY);
+    const w = Math.abs(m.currentX - m.startX);
+    const h = Math.abs(m.currentY - m.startY);
+    entitiesLayer.appendChild(el("rect", {
+      x, y, width: w, height: h,
+      class: "marquee-box"
     }));
   }
 }
@@ -1363,7 +1052,7 @@ function subDigits(n){
 }
 
 function renderArrow(arrow, style){
-  const isSel = isEntitySelected("arrow", arrow.id);
+  const isSel = state.selection && state.selection.kind === "arrow" && state.selection.id === arrow.id;
   const stroke = isSel ? "var(--accent)" : "var(--ink)";
   const g = el("g", { "data-kind":"arrow", "data-id": arrow.id });
   const dx = arrow.x2 - arrow.x1, dy = arrow.y2 - arrow.y1;
@@ -1420,43 +1109,6 @@ function renderKeyboardCursor(){
   cursorLayer.appendChild(el("line", { x1:c.x, y1:c.y-14, x2:c.x, y2:c.y+14, stroke:"var(--focus)", "stroke-width":1 }));
 }
 
-function rectFromPoints(a, b){
-  return { x: Math.min(a.x,b.x), y: Math.min(a.y,b.y), width: Math.abs(a.x-b.x), height: Math.abs(a.y-b.y) };
-}
-function pointInRect(p, r){
-  return p.x >= r.x && p.x <= r.x+r.width && p.y >= r.y && p.y <= r.y+r.height;
-}
-
-function renderMarquee(){
-  marqueeLayer.innerHTML = "";
-  if(!dragState || dragState.mode !== "marquee") return;
-  const r = rectFromPoints(dragState.start, dragState.current);
-  marqueeLayer.appendChild(el("rect", {
-    x:r.x, y:r.y, width:r.width, height:r.height,
-    fill:"var(--accent-tint)", opacity:0.25, stroke:"var(--accent)", "stroke-width":1, "stroke-dasharray":"4 3"
-  }));
-}
-
-// Everything whose representative point falls inside the rectangle.
-function entitiesInRect(rect){
-  const ids = [];
-  Object.values(state.scene.atoms).forEach(a => { if(pointInRect(a, rect)) ids.push({ kind:"atom", id:a.id }); });
-  Object.values(state.scene.texts).forEach(t => { if(pointInRect(t, rect)) ids.push({ kind:"text", id:t.id }); });
-  Object.values(state.scene.arrows).forEach(a => {
-    const mid = { x:(a.x1+a.x2)/2, y:(a.y1+a.y2)/2 };
-    if(pointInRect(mid, rect)) ids.push({ kind:"arrow", id:a.id });
-  });
-  return ids;
-}
-
-function selectGroup(ids){
-  if(ids.length === 0){ state.selection = null; renderAll(); return; }
-  if(ids.length === 1){ state.selection = ids[0]; renderAll(); announce((ids[0].kind[0].toUpperCase()+ids[0].kind.slice(1)) + " selected."); return; }
-  state.selection = { kind:"group", ids };
-  renderAll();
-  announce(ids.length + " items selected. Drag any of them, or use arrow keys, to move the group together.");
-}
-
 /* =========================================================================
    9. PROPERTIES PANEL
    ========================================================================= */
@@ -1465,38 +1117,111 @@ function $(sel){ return document.querySelector(sel); }
 function renderProperties(){
   const body = $("#properties-body");
   body.innerHTML = "";
-  if(!state.selection){
-    body.innerHTML = '<p class="empty-note">Nothing selected. Choose the Select tool and click an atom, bond, arrow, or text label to edit it here. Drag across empty canvas to select several at once.</p>';
+  if(state.selectedAtoms.size > 1){
+    renderGroupProps(body);
     return;
   }
-  if(state.selection.kind === "group"){ renderGroupProps(body, state.selection.ids); return; }
+  if(!state.selection){
+    body.innerHTML = '<p class="empty-note">Nothing selected. Choose the Select tool and click an atom, bond, arrow, or text label to edit it here.</p>';
+    return;
+  }
   const { kind, id } = state.selection;
   if(kind === "atom") renderAtomProps(body, state.scene.atoms[id]);
   else if(kind === "bond") renderBondProps(body, state.scene.bonds[id]);
   else if(kind === "arrow") renderArrowProps(body, state.scene.arrows[id]);
   else if(kind === "text") renderTextProps(body, state.scene.texts[id]);
+  else if(kind === "group") renderGroupProps(body);
 }
 
-function renderGroupProps(body, ids){
-  const counts = {};
-  ids.forEach(e => { counts[e.kind] = (counts[e.kind]||0) + 1; });
-  const parts = Object.keys(counts).map(k => counts[k] + " " + k + (counts[k]>1 ? "s" : ""));
-  const info = document.createElement("p"); info.className = "empty-note";
-  info.textContent = ids.length + " items selected (" + parts.join(", ") + "). Drag any of them, or use the arrow keys, to move the whole group together.";
-  body.appendChild(info);
+function renderGroupProps(body){
+  const count = state.selectedAtoms.size;
+  const p = document.createElement("p");
+  p.style.fontWeight = "600";
+  p.style.color = "var(--focus)";
+  p.style.marginBottom = "8px";
+  p.textContent = `Group selected: ${count} atom(s), ${state.selectedBonds.size} bond(s)`;
+  body.appendChild(p);
 
-  const actions = document.createElement("div"); actions.className = "prop-actions";
-  const btn = document.createElement("button");
-  btn.textContent = "Delete all";
-  btn.addEventListener("click", () => {
-    ids.forEach(e => deleteEntity(e.kind, e.id));
-    state.selection = null;
+  const elSel = document.createElement("select");
+  const defaultOpt = document.createElement("option");
+  defaultOpt.textContent = "Change element of all...";
+  defaultOpt.value = "";
+  elSel.appendChild(defaultOpt);
+  Object.keys(VALENCE).forEach(sym => {
+    const o = document.createElement("option"); o.value = sym; o.textContent = sym;
+    elSel.appendChild(o);
+  });
+  elSel.addEventListener("change", () => {
+    if(!elSel.value) return;
+    state.selectedAtoms.forEach(id => {
+      const a = state.scene.atoms[id];
+      if(a) a.element = elSel.value;
+    });
     pushHistory();
     renderAll();
-    announce("Deleted " + ids.length + " items.");
+    announce(`Changed element of ${count} atoms to ${elSel.value}.`);
   });
-  actions.appendChild(btn);
-  body.appendChild(actions);
+  body.appendChild(field("Batch element", elSel));
+
+  const row1 = document.createElement("div");
+  row1.className = "prop-actions";
+  const flipH = document.createElement("button");
+  flipH.textContent = "Flip H";
+  flipH.title = "Flip selected atoms horizontally";
+  flipH.addEventListener("click", () => transformSelectedAtoms("flipH"));
+  const flipV = document.createElement("button");
+  flipV.textContent = "Flip V";
+  flipV.title = "Flip selected atoms vertically";
+  flipV.addEventListener("click", () => transformSelectedAtoms("flipV"));
+  const rot30 = document.createElement("button");
+  rot30.textContent = "Rotate 30\u00B0";
+  rot30.title = "Rotate selected atoms 30 degrees";
+  rot30.addEventListener("click", () => transformSelectedAtoms("rot30"));
+  row1.appendChild(flipH); row1.appendChild(flipV); row1.appendChild(rot30);
+  body.appendChild(row1);
+
+  const delBtn = document.createElement("button");
+  delBtn.textContent = "Delete selected";
+  delBtn.style.marginTop = "8px";
+  delBtn.addEventListener("click", deleteSelection);
+  body.appendChild(delBtn);
+}
+
+function transformSelectedAtoms(type){
+  const atoms = [...state.selectedAtoms].map(id => state.scene.atoms[id]).filter(Boolean);
+  if(atoms.length === 0) return;
+  let cx = atoms.reduce((s, a) => s + a.x, 0) / atoms.length;
+  let cy = atoms.reduce((s, a) => s + a.y, 0) / atoms.length;
+
+  atoms.forEach(a => {
+    if(type === "flipH"){
+      a.x = cx - (a.x - cx);
+    } else if(type === "flipV"){
+      a.y = cy - (a.y - cy);
+    } else if(type === "rot30"){
+      const rad = Math.PI / 6;
+      const rx = a.x - cx, ry = a.y - cy;
+      a.x = cx + rx * Math.cos(rad) - ry * Math.sin(rad);
+      a.y = cy + rx * Math.sin(rad) + ry * Math.cos(rad);
+    }
+  });
+  pushHistory();
+  renderAll();
+  announce("Transformed selection.");
+}
+
+function deleteSelection(){
+  state.selectedAtoms.forEach(id => deleteEntity("atom", id));
+  state.selectedBonds.forEach(id => deleteEntity("bond", id));
+  if(state.selection && !state.selectedAtoms.has(state.selection.id)){
+    deleteEntity(state.selection.kind, state.selection.id);
+  }
+  state.selectedAtoms.clear();
+  state.selectedBonds.clear();
+  state.selection = null;
+  pushHistory();
+  renderAll();
+  announce("Deleted selection.");
 }
 
 function field(labelText, inputEl){
@@ -1544,7 +1269,7 @@ function renderAtomProps(body, atom){
   const valence = atomValenceInfo(atom);
   const info = document.createElement("p"); info.className = "empty-note";
   info.textContent = valence.checked
-    ? `${bondsOfAtom(atom.id).length} bond(s), ${valence.hCount} H` + (valence.overfilled ? " \u2014 valence exceeded" : "")
+    ? `${bondsOfAtom(atom.id).length} bond(s), ${valence.implicitH} implicit H` + (valence.overfilled ? " \u2014 valence exceeded" : "")
     : "Valence not checked for this element.";
   if(valence.overfilled) info.style.color = "var(--warn-tint)";
   body.appendChild(info);
@@ -1646,13 +1371,21 @@ function renderStructureSummary(){
   }
   const atomIndex = {}; atoms.forEach((a,i) => atomIndex[a.id] = i+1);
   let html = "";
+
+  const mol = calculateMolecularSummary();
+  if(mol.formula !== "No structure"){
+    html += `<div class="formula-card">
+      <div><div class="lbl">Formula</div><div class="f-val">${mol.formula}</div></div>
+      <div><div class="lbl" style="text-align:right;">Mol. Weight</div><div class="mw-val">${mol.mw}</div></div>
+    </div>`;
+  }
   if(atoms.length){
     html += "<h3>Atoms (" + atoms.length + ")</h3><ul class='struct-list'>";
     atoms.forEach((a,i) => {
       const v = atomValenceInfo(a);
       const bits = [a.element];
       if(a.charge) bits.push((a.charge>0?"+":"") + a.charge + " charge");
-      if(v.checked) bits.push(v.hCount + " H");
+      if(v.checked) bits.push(v.implicitH + " implicit H");
       if(v.overfilled) bits.push("VALENCE EXCEEDED");
       html += `<li class="${v.overfilled?'err':''}">${i+1}. ${bits.join(", ")} at (${Math.round(a.x)}, ${Math.round(a.y)})</li>`;
     });
@@ -1747,15 +1480,15 @@ function resetZoom(){
    14. TOOL / UI STATE
    ========================================================================= */
 const TOOL_DESCRIPTIONS = {
-  select: "click an item to select and drag to move it, or drag across empty space to select a group.",
-  atom: "click the canvas to place an atom of the selected element. Stays active for placing several in a row.",
-  bond: "drag from an atom to draw a bond; click an existing bond to cycle its type. Stays active for a whole chain.",
-  text: "click the canvas to add a text label, then switches to Select so you can type into it.",
-  erase: "click any item to remove it. Stays active for erasing several in a row.",
-  "arrow-forward": "drag to draw a forward reaction arrow, then switches to Select so you can add conditions.",
-  "arrow-eq": "drag to draw an equilibrium arrow, then switches to Select so you can add conditions.",
-  "arrow-res": "drag to draw a resonance arrow, then switches to Select so you can add conditions.",
-  "arrow-retro": "drag to draw a retrosynthetic arrow, then switches to Select so you can add conditions."
+  select: "click an item to select and drag to move it.",
+  atom: "click the canvas to place an atom of the selected element.",
+  bond: "drag from an atom to draw a bond; click an existing bond to cycle its type.",
+  text: "click the canvas to add a text label.",
+  erase: "click any item to remove it.",
+  "arrow-forward": "drag to draw a forward reaction arrow.",
+  "arrow-eq": "drag to draw an equilibrium arrow.",
+  "arrow-res": "drag to draw a resonance arrow.",
+  "arrow-retro": "drag to draw a retrosynthetic arrow."
 };
 const TOOL_LABELS = {
   select:"Select", atom:"Atom", bond:"Bond", text:"Text", erase:"Erase",
@@ -1766,7 +1499,7 @@ function setTool(tool){
   state.tool = tool;
   state.bondDraft = null;
   document.querySelectorAll("[data-tool]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.tool === tool)));
-  svg.setAttribute("class", "tool-" + (tool.startsWith("arrow") ? "bond" : tool));
+  svg.className = "tool-" + (tool.startsWith("arrow") ? "bond" : tool);
   $("#tool-readout").textContent = "Tool: " + TOOL_LABELS[tool];
   $("#hint-tool-name").textContent = TOOL_LABELS[tool];
   $("#hint-tool-desc").textContent = TOOL_DESCRIPTIONS[tool];
@@ -1788,14 +1521,79 @@ function selectEntity(kind, id){
 /* =========================================================================
    15. POINTER INTERACTION
    ========================================================================= */
-let dragState = null; // {mode:'move-atom'|'move-text'|'move-arrow'|'pan', ...}
+let dragState = null; // {mode:'move-atoms'|'move-text'|'move-arrow'|'pan'|'draw-bond'|'marquee', ...}
+
+function smartSproutBond(startAtom){
+  const bonds = bondsOfAtom(startAtom.id);
+  const L = currentStyle().bondLength;
+  let angle = 0;
+
+  if(bonds.length === 0){
+    // 0 bonds: sprout upward-right at -30 deg (-pi/6)
+    angle = -Math.PI / 6;
+  } else if(bonds.length === 1){
+    // 1 bond: zigzag at 120 deg from incoming bond
+    const other = state.scene.atoms[bonds[0].a1 === startAtom.id ? bonds[0].a2 : bonds[0].a1];
+    const inAngle = Math.atan2(startAtom.y - (other ? other.y : startAtom.y), startAtom.x - (other ? other.x : startAtom.x));
+    const cand1 = inAngle + (Math.PI * 2 / 3);
+    const cand2 = inAngle - (Math.PI * 2 / 3);
+    angle = (Math.sin(cand1) < Math.sin(cand2)) ? cand1 : cand2;
+  } else if(bonds.length === 2){
+    // 2 bonds: bisect the larger angle
+    const angles = bonds.map(b => {
+      const other = state.scene.atoms[b.a1 === startAtom.id ? b.a2 : b.a1];
+      return Math.atan2((other ? other.y : startAtom.y) - startAtom.y, (other ? other.x : startAtom.x) - startAtom.x);
+    }).sort((a,b) => a - b);
+    let diff = angles[1] - angles[0];
+    if(diff > Math.PI){
+      angle = (angles[1] + angles[0] + 2*Math.PI) / 2;
+    } else {
+      angle = (angles[0] + angles[1]) / 2 + Math.PI;
+    }
+  } else if(bonds.length === 3){
+    // 3 bonds: find the largest gap
+    const angles = bonds.map(b => {
+      const other = state.scene.atoms[b.a1 === startAtom.id ? b.a2 : b.a1];
+      return Math.atan2((other ? other.y : startAtom.y) - startAtom.y, (other ? other.x : startAtom.x) - startAtom.x);
+    }).sort((a,b) => a - b);
+    let maxGap = 0, bestMid = 0;
+    for(let i=0; i<3; i++){
+      const a1 = angles[i];
+      const a2 = i === 2 ? angles[0] + 2*Math.PI : angles[i+1];
+      const gap = a2 - a1;
+      if(gap > maxGap){
+        maxGap = gap;
+        bestMid = a1 + gap/2;
+      }
+    }
+    angle = bestMid;
+  } else {
+    announce("Atom already has 4 bonds.");
+    return;
+  }
+
+  angle = Math.round(angle / ANGLE_SNAP_RAD) * ANGLE_SNAP_RAD;
+  const newPos = { x: startAtom.x + L * Math.cos(angle), y: startAtom.y + L * Math.sin(angle) };
+  const target = findAtomNear(newPos, CONNECT_SNAP_RADIUS);
+  const endId = (target && target.id !== startAtom.id) ? target.id : addAtom(newPos, "C");
+  createOrCycleBond(startAtom.id, endId, state.bondType);
+  pushHistory();
+  renderAll();
+  announce("Bond sprouted.");
+}
+
+function setBondType(typeStr){
+  state.bondType = typeStr;
+  document.querySelectorAll("[data-bond-type]").forEach(b => {
+    b.setAttribute("aria-pressed", String(b.dataset.bondType === typeStr));
+  });
+  if(state.tool !== "bond") setTool("bond");
+}
 
 svg.addEventListener("contextmenu", e => e.preventDefault());
 
 svg.addEventListener("pointerdown", (e) => {
-  e.preventDefault();
   svg.setPointerCapture(e.pointerId);
-  svg.focus({ preventScroll: true });
   const world = toWorld(e.clientX, e.clientY);
 
   if(e.button === 1 || state.spaceHeld){
@@ -1804,37 +1602,110 @@ svg.addEventListener("pointerdown", (e) => {
     return;
   }
 
-  if(e.shiftKey){
-    state.keyboardCursor = snapToGrid(world);
-    renderKeyboardCursor();
-    announce("Keyboard cursor moved here.");
-    return;
+  // Alt/Option-drag in Bond or Atom tool: move atom directly without switching tools!
+  if((state.tool === "bond" || state.tool === "atom") && (e.altKey || e.button === 2)){
+    const hitAtom = findAtomNear(world, CONNECT_SNAP_RADIUS);
+    if(hitAtom){
+      const initPos = new Map([[hitAtom.id, { x: hitAtom.x, y: hitAtom.y }]]);
+      dragState = { mode: "move-atoms", startWorld: { ...world }, initPos };
+      return;
+    }
   }
 
   if(state.tool === "select"){
-    const hit = findEntityNear(world);
-    if(hit && isEntitySelected(hit.kind, hit.id) && groupIds().length > 0){
-      dragState = { mode:"move-group", start:{...world} };
+    const hitAtom = findAtomNear(world, CONNECT_SNAP_RADIUS);
+    const hitBond = hitAtom ? null : findBondNear(world, 14);
+
+    if(hitAtom){
+      if(e.shiftKey){
+        if(state.selectedAtoms.has(hitAtom.id)) state.selectedAtoms.delete(hitAtom.id);
+        else state.selectedAtoms.add(hitAtom.id);
+      } else if(!state.selectedAtoms.has(hitAtom.id)){
+        state.selectedAtoms.clear();
+        state.selectedBonds.clear();
+        state.selectedAtoms.add(hitAtom.id);
+      }
+      state.selection = state.selectedAtoms.size === 1 ? { kind:"atom", id: hitAtom.id } : { kind:"group", count: state.selectedAtoms.size };
+      const initPos = new Map();
+      state.selectedAtoms.forEach(id => {
+        const a = state.scene.atoms[id];
+        if(a) initPos.set(id, { x: a.x, y: a.y });
+      });
+      dragState = { mode:"move-atoms", startWorld: { ...world }, initPos };
+      renderAll();
       return;
     }
-    selectEntity(hit ? hit.kind : null, hit ? hit.id : null);
-    if(hit && hit.kind === "atom") dragState = { mode:"move-atom", id: hit.id };
-    else if(hit && hit.kind === "text") dragState = { mode:"move-text", id: hit.id };
-    else if(hit && hit.kind === "arrow") dragState = { mode:"move-arrow", id: hit.id, start:{...world} };
-    else dragState = { mode:"marquee", start:{...world}, current:{...world} };
+
+    if(hitBond){
+      if(e.shiftKey){
+        state.selectedBonds.add(hitBond.id);
+        state.selectedAtoms.add(hitBond.a1);
+        state.selectedAtoms.add(hitBond.a2);
+      } else if(!state.selectedBonds.has(hitBond.id)){
+        state.selectedAtoms.clear();
+        state.selectedBonds.clear();
+        state.selectedBonds.add(hitBond.id);
+        state.selectedAtoms.add(hitBond.a1);
+        state.selectedAtoms.add(hitBond.a2);
+      }
+      state.selection = { kind:"bond", id: hitBond.id };
+      const initPos = new Map();
+      state.selectedAtoms.forEach(id => {
+        const a = state.scene.atoms[id];
+        if(a) initPos.set(id, { x: a.x, y: a.y });
+      });
+      dragState = { mode:"move-atoms", startWorld: { ...world }, initPos };
+      renderAll();
+      return;
+    }
+
+    const hitEntity = findEntityNear(world);
+    if(hitEntity){
+      state.selectedAtoms.clear();
+      state.selectedBonds.clear();
+      selectEntity(hitEntity.kind, hitEntity.id);
+      if(hitEntity.kind === "text") dragState = { mode:"move-text", id: hitEntity.id, startX: state.scene.texts[hitEntity.id].x, startY: state.scene.texts[hitEntity.id].y, startWorld: { ...world } };
+      else if(hitEntity.kind === "arrow") dragState = { mode:"move-arrow", id: hitEntity.id, start:{...world} };
+      return;
+    }
+
+    // Empty canvas click in Select tool: start Marquee selection
+    if(!e.shiftKey){
+      state.selectedAtoms.clear();
+      state.selectedBonds.clear();
+      state.selection = null;
+      renderAll();
+    }
+    dragState = { mode:"marquee", startX: world.x, startY: world.y, currentX: world.x, currentY: world.y };
+    state.marqueeDraft = { startX: world.x, startY: world.y, currentX: world.x, currentY: world.y };
     return;
   }
 
   if(state.tool === "erase"){
     const hit = findEntityNear(world);
-    if(hit){ deleteEntity(hit.kind, hit.id); state.selection = null; pushHistory(); renderAll(); announce("Erased " + hit.kind + "."); }
+    if(hit){
+      deleteEntity(hit.kind, hit.id);
+      state.selection = null;
+      pushHistory();
+      renderAll();
+      announce("Erased " + hit.kind + ".");
+    }
     return;
   }
 
   if(state.tool === "atom"){
-    const hit = findAtomNear(world);
-    if(hit){ hit.element = state.currentElement; pushHistory(); renderAll(); announce("Atom relabeled " + state.currentElement + "."); }
-    else{ const id = addAtom(world, state.currentElement); pushHistory(); renderAll(); announce(state.currentElement + " atom placed."); }
+    const hit = findAtomNear(world, CONNECT_SNAP_RADIUS);
+    if(hit){
+      hit.element = state.currentElement;
+      pushHistory();
+      renderAll();
+      announce("Atom relabeled " + state.currentElement + ".");
+    } else {
+      const id = addAtom(world, state.currentElement);
+      pushHistory();
+      renderAll();
+      announce(state.currentElement + " atom placed.");
+    }
     return;
   }
 
@@ -1850,16 +1721,25 @@ svg.addEventListener("pointerdown", (e) => {
   }
 
   if(state.tool === "bond"){
-    const hitAtom = findAtomNear(world);
+    const hitAtom = findAtomNear(world, CONNECT_SNAP_RADIUS);
+    const hitBond = hitAtom ? null : findBondNear(world, 10);
+
+    if(hitBond){
+      cycleBond(hitBond);
+      pushHistory();
+      renderAll();
+      announce("Bond type changed.");
+      return;
+    }
+
     if(hitAtom){
-      dragState = { mode:"draw-bond", startAtomId: hitAtom.id };
-      state.bondDraft = { startAtomId: hitAtom.id, x:hitAtom.x, y:hitAtom.y };
+      dragState = { mode:"draw-bond", startAtomId: hitAtom.id, startWorld:{...world}, isClick:true };
+      state.bondDraft = { startAtomId: hitAtom.id, x: hitAtom.x, y: hitAtom.y, snapAtomId: null };
     } else {
-      const existingBond = findBondNear(world, 6);
-      if(existingBond){ cycleBond(existingBond); pushHistory(); renderAll(); announce("Bond type changed."); return; }
-      const newId = addAtom(world, state.currentElement);
-      dragState = { mode:"draw-bond", startAtomId: newId };
-      state.bondDraft = { startAtomId: newId, x: world.x, y: world.y };
+      // Place start atom in empty canvas
+      const newId = addAtom(world, "C");
+      dragState = { mode:"draw-bond", startAtomId: newId, startWorld:{...world}, isClick:true, isNewStart:true };
+      state.bondDraft = { startAtomId: newId, x: world.x, y: world.y, snapAtomId: null };
     }
     return;
   }
@@ -1881,30 +1761,37 @@ svg.addEventListener("pointermove", (e) => {
     applyViewportTransform();
     return;
   }
-  if(dragState.mode === "move-atom"){
-    const atom = state.scene.atoms[dragState.id];
-    if(atom){ const p = snapToGrid(world); atom.x = p.x; atom.y = p.y; renderEntities(); }
+  if(dragState.mode === "move-atoms"){
+    const rawDx = world.x - dragState.startWorld.x;
+    const rawDy = world.y - dragState.startWorld.y;
+    const snappedDx = state.gridSnap ? Math.round(rawDx / GRID_STEP) * GRID_STEP : rawDx;
+    const snappedDy = state.gridSnap ? Math.round(rawDy / GRID_STEP) * GRID_STEP : rawDy;
+
+    dragState.initPos.forEach((orig, id) => {
+      const atom = state.scene.atoms[id];
+      if(atom){
+        atom.x = orig.x + snappedDx;
+        atom.y = orig.y + snappedDy;
+      }
+    });
+    renderEntities();
     return;
   }
   if(dragState.mode === "marquee"){
-    dragState.current = world;
-    renderMarquee();
-    return;
-  }
-  if(dragState.mode === "move-group"){
-    const dx = world.x - dragState.start.x, dy = world.y - dragState.start.y;
-    groupIds().forEach(e => {
-      if(e.kind === "atom"){ const a = state.scene.atoms[e.id]; if(a){ a.x += dx; a.y += dy; } }
-      else if(e.kind === "text"){ const t = state.scene.texts[e.id]; if(t){ t.x += dx; t.y += dy; } }
-      else if(e.kind === "arrow"){ const ar = state.scene.arrows[e.id]; if(ar){ ar.x1+=dx; ar.y1+=dy; ar.x2+=dx; ar.y2+=dy; } }
-    });
-    dragState.start = world;
+    dragState.currentX = world.x;
+    dragState.currentY = world.y;
+    state.marqueeDraft.currentX = world.x;
+    state.marqueeDraft.currentY = world.y;
     renderEntities();
     return;
   }
   if(dragState.mode === "move-text"){
     const t = state.scene.texts[dragState.id];
-    if(t){ const p = snapToGrid(world); t.x = p.x; t.y = p.y; renderEntities(); }
+    if(t){
+      const p = snapToGrid(world);
+      t.x = p.x; t.y = p.y;
+      renderEntities();
+    }
     return;
   }
   if(dragState.mode === "move-arrow"){
@@ -1919,8 +1806,23 @@ svg.addEventListener("pointermove", (e) => {
   }
   if(dragState.mode === "draw-bond"){
     const startAtom = state.scene.atoms[dragState.startAtomId];
-    const snapped = snapAngleTo(startAtom, world, currentStyle().bondLength);
-    state.bondDraft.x = snapped.x; state.bondDraft.y = snapped.y;
+    if(!startAtom) return;
+    const d = dist(startAtom, world);
+    if(d > 6) dragState.isClick = false;
+
+    // Check magnetic snap to other existing atoms
+    const snapTarget = findAtomNear(world, CONNECT_SNAP_RADIUS);
+    if(snapTarget && snapTarget.id !== dragState.startAtomId){
+      state.bondDraft.x = snapTarget.x;
+      state.bondDraft.y = snapTarget.y;
+      state.bondDraft.snapAtomId = snapTarget.id;
+    } else {
+      state.bondDraft.snapAtomId = null;
+      const targetLen = d < currentStyle().bondLength * 1.3 ? currentStyle().bondLength : d;
+      const snapped = snapAngleTo(startAtom, world, targetLen);
+      state.bondDraft.x = snapped.x;
+      state.bondDraft.y = snapped.y;
+    }
     renderEntities();
     return;
   }
@@ -1938,18 +1840,65 @@ function endPointerInteraction(e){
 
   if(dragState.mode === "pan"){ svg.classList.remove("panning"); dragState = null; return; }
 
-  if(dragState.mode === "draw-bond"){
+  if(dragState.mode === "move-atoms"){
+    pushHistory();
+    renderAll();
+    announce("Moved selection.");
+  } else if(dragState.mode === "marquee"){
+    const minX = Math.min(dragState.startX, dragState.currentX);
+    const maxX = Math.max(dragState.startX, dragState.currentX);
+    const minY = Math.min(dragState.startY, dragState.currentY);
+    const maxY = Math.max(dragState.startY, dragState.currentY);
+
+    if(maxX - minX > 5 || maxY - minY > 5){
+      Object.values(state.scene.atoms).forEach(a => {
+        if(a.x >= minX && a.x <= maxX && a.y >= minY && a.y <= maxY){
+          state.selectedAtoms.add(a.id);
+        }
+      });
+      Object.values(state.scene.bonds).forEach(b => {
+        const a1 = state.scene.atoms[b.a1], a2 = state.scene.atoms[b.a2];
+        if(a1 && a2 && state.selectedAtoms.has(a1.id) && state.selectedAtoms.has(a2.id)){
+          state.selectedBonds.add(b.id);
+        }
+      });
+      if(state.selectedAtoms.size === 1){
+        const firstId = [...state.selectedAtoms][0];
+        state.selection = { kind: "atom", id: firstId };
+      } else if(state.selectedAtoms.size > 1){
+        state.selection = { kind: "group", count: state.selectedAtoms.size };
+      }
+      announce(`${state.selectedAtoms.size} atom(s) selected.`);
+    }
+    state.marqueeDraft = null;
+    renderAll();
+  } else if(dragState.mode === "draw-bond"){
     const startAtom = state.scene.atoms[dragState.startAtomId];
-    const endPos = snapAngleTo(startAtom, world, currentStyle().bondLength);
-    const target = findAtomNear(endPos);
-    let endId;
-    if(target && target.id !== dragState.startAtomId) endId = target.id;
-    else endId = addAtom(endPos, state.currentElement);
-    if(endId !== dragState.startAtomId) createOrCycleBond(dragState.startAtomId, endId);
+    if(startAtom){
+      if(dragState.isClick){
+        // Simple click without drag: sprout bond at optimal angle
+        smartSproutBond(startAtom);
+      } else if(state.bondDraft && state.bondDraft.snapAtomId){
+        // Connected to existing atom!
+        createOrCycleBond(startAtom.id, state.bondDraft.snapAtomId, state.bondType);
+        announce("Connected to atom.");
+      } else {
+        // Check near release point
+        const releasePos = { x: state.bondDraft.x, y: state.bondDraft.y };
+        const target = findAtomNear(releasePos, CONNECT_SNAP_RADIUS);
+        if(target && target.id !== startAtom.id){
+          createOrCycleBond(startAtom.id, target.id, state.bondType);
+          announce("Connected to atom.");
+        } else {
+          const endId = addAtom(releasePos, "C");
+          createOrCycleBond(startAtom.id, endId, state.bondType);
+          announce("Bond drawn.");
+        }
+      }
+    }
     state.bondDraft = null;
     pushHistory();
     renderAll();
-    announce("Bond drawn.");
   } else if(dragState.mode === "draw-arrow"){
     const endPos = snapAngleTo(dragState.start, world, null);
     if(dist(dragState.start, endPos) > 8){
@@ -1965,229 +1914,39 @@ function endPointerInteraction(e){
       state.bondDraft = null;
       renderEntities();
     }
-  } else if(dragState.mode === "marquee"){
-    const rect = rectFromPoints(dragState.start, dragState.current);
-    const found = entitiesInRect(rect);
-    dragState = null;
-    marqueeLayer.innerHTML = "";
-    selectGroup(found);
-    return;
   } else if(dragState.mode.startsWith("move-")){
     pushHistory();
+    renderAll();
   }
   dragState = null;
 }
+
+svg.addEventListener("dblclick", (e) => {
+  const world = toWorld(e.clientX, e.clientY);
+  const hitAtom = findAtomNear(world, CONNECT_SNAP_RADIUS);
+  if(hitAtom){
+    const comp = getConnectedComponent(hitAtom.id);
+    state.selectedAtoms = comp.atoms;
+    state.selectedBonds = comp.bonds;
+    state.selection = { kind: "group", count: comp.atoms.size };
+    renderAll();
+    announce(`Molecule selected: ${comp.atoms.size} atom(s), ${comp.bonds.size} bond(s).`);
+    return;
+  }
+  const hitBond = findBondNear(world, 14);
+  if(hitBond){
+    const comp = getConnectedComponent(hitBond.a1);
+    state.selectedAtoms = comp.atoms;
+    state.selectedBonds = comp.bonds;
+    state.selection = { kind: "group", count: comp.atoms.size };
+    renderAll();
+    announce(`Molecule selected: ${comp.atoms.size} atom(s), ${comp.bonds.size} bond(s).`);
+    return;
+  }
+});
+
 svg.addEventListener("pointerup", endPointerInteraction);
 svg.addEventListener("pointercancel", endPointerInteraction);
-
-svg.addEventListener("wheel", (e) => {
-  e.preventDefault();
-  const factor = e.deltaY < 0 ? 1.1 : 0.9;
-  zoomAt(e.clientX, e.clientY, factor);
-}, { passive:false });
-
-/* =========================================================================
-   16. KEYBOARD INTERACTION
-   ========================================================================= */
-function isTypingTarget(e){
-  const t = e.target;
-  return t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable);
-}
-
-svg.addEventListener("focus", renderKeyboardCursor);
-svg.addEventListener("blur", renderKeyboardCursor);
-
-svg.addEventListener("keydown", (e) => {
-  const step = e.shiftKey ? GRID_STEP * 2 : GRID_STEP;
-  const kc = state.keyboardCursor;
-
-  if(["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"].includes(e.key)){
-    e.preventDefault();
-    if(state.selection){
-      const moved = moveSelectionBy(
-        e.key === "ArrowLeft" ? -step : e.key === "ArrowRight" ? step : 0,
-        e.key === "ArrowUp" ? -step : e.key === "ArrowDown" ? step : 0
-      );
-      if(moved){ renderEntities(); renderStructureSummary(); return; }
-    }
-    if(e.key === "ArrowLeft") kc.x -= step;
-    if(e.key === "ArrowRight") kc.x += step;
-    if(e.key === "ArrowUp") kc.y -= step;
-    if(e.key === "ArrowDown") kc.y += step;
-    renderKeyboardCursor();
-    return;
-  }
-
-  if(e.key === "Enter" || e.key === " "){
-    e.preventDefault();
-    performActiveToolAtCursor();
-    return;
-  }
-
-  if(e.key === "Escape"){
-    if(state.bondDraft || dragState){
-      state.bondDraft = null;
-      dragState = null;
-      svg.classList.remove("panning");
-      marqueeLayer.innerHTML = "";
-      renderEntities();
-      announce("Cancelled.");
-    }
-    else selectEntity(null, null);
-    return;
-  }
-
-  if(e.key === "Delete" || e.key === "Backspace"){
-    if(state.selection && state.selection.kind === "group"){
-      e.preventDefault();
-      const n = state.selection.ids.length;
-      state.selection.ids.forEach(entry => deleteEntity(entry.kind, entry.id));
-      state.selection = null;
-      pushHistory();
-      renderAll();
-      announce("Deleted " + n + " items.");
-      return;
-    }
-    if(state.selection){
-      e.preventDefault();
-      deleteEntity(state.selection.kind, state.selection.id);
-      const k = state.selection.kind;
-      state.selection = null;
-      pushHistory();
-      renderAll();
-      announce("Deleted " + k + ".");
-    }
-    return;
-  }
-});
-
-function moveSelectionBy(dx, dy){
-  if(!state.selection) return false;
-  if(state.selection.kind === "group"){
-    let moved = false;
-    groupIds().forEach(e => {
-      if(e.kind === "atom"){ const a = state.scene.atoms[e.id]; if(a){ a.x+=dx; a.y+=dy; moved = true; } }
-      else if(e.kind === "text"){ const t = state.scene.texts[e.id]; if(t){ t.x+=dx; t.y+=dy; moved = true; } }
-      else if(e.kind === "arrow"){ const a = state.scene.arrows[e.id]; if(a){ a.x1+=dx; a.y1+=dy; a.x2+=dx; a.y2+=dy; moved = true; } }
-    });
-    if(moved) scheduleHistoryPush();
-    return moved;
-  }
-  const { kind, id } = state.selection;
-  let obj = kind === "atom" ? state.scene.atoms[id] : kind === "text" ? state.scene.texts[id] : null;
-  if(obj){ obj.x += dx; obj.y += dy; scheduleHistoryPush(); return true; }
-  if(kind === "arrow"){ const a = state.scene.arrows[id]; if(a){ a.x1+=dx; a.y1+=dy; a.x2+=dx; a.y2+=dy; scheduleHistoryPush(); return true; } }
-  return false;
-}
-let nudgeTimer = null;
-function scheduleHistoryPush(){ clearTimeout(nudgeTimer); nudgeTimer = setTimeout(pushHistory, 400); }
-
-function performActiveToolAtCursor(){
-  const pos = { x: state.keyboardCursor.x, y: state.keyboardCursor.y };
-  const tool = state.tool;
-
-  if(tool === "select"){
-    const hit = findEntityNear(pos);
-    selectEntity(hit ? hit.kind : null, hit ? hit.id : null);
-    return;
-  }
-  if(tool === "erase"){
-    const hit = findEntityNear(pos);
-    if(hit){ deleteEntity(hit.kind, hit.id); state.selection = null; pushHistory(); renderAll(); announce("Erased " + hit.kind + "."); }
-    else announce("Nothing near the keyboard cursor to erase.");
-    return;
-  }
-  if(tool === "atom"){
-    const hit = findAtomNear(pos);
-    if(hit){ hit.element = state.currentElement; pushHistory(); renderAll(); announce("Atom relabeled " + state.currentElement + "."); }
-    else{ addAtom(pos, state.currentElement); pushHistory(); renderAll(); announce(state.currentElement + " atom placed at cursor."); }
-    return;
-  }
-  if(tool === "text"){
-    const id = uid("text");
-    state.scene.texts[id] = { id, x:pos.x, y:pos.y, text:"Label", fontSizePt:14, isBold:false };
-    pushHistory(); setTool("select"); selectEntity("text", id);
-    announce("Text label added at cursor.");
-    return;
-  }
-  if(tool === "bond"){
-    if(!state.bondDraft){
-      const hit = findAtomNear(pos);
-      const startId = hit ? hit.id : addAtom(pos, state.currentElement);
-      state.bondDraft = { startAtomId: startId, x: state.scene.atoms[startId].x, y: state.scene.atoms[startId].y };
-      announce("Bond start set. Move the keyboard cursor and press Enter to finish.");
-    } else {
-      const startAtom = state.scene.atoms[state.bondDraft.startAtomId];
-      const endPos = snapAngleTo(startAtom, pos, null);
-      const target = findAtomNear(endPos);
-      const endId = target && target.id !== state.bondDraft.startAtomId ? target.id : addAtom(endPos, state.currentElement);
-      if(endId !== state.bondDraft.startAtomId){ createOrCycleBond(state.bondDraft.startAtomId, endId); announce("Bond completed."); }
-      state.bondDraft = null;
-      pushHistory(); renderAll();
-    }
-    return;
-  }
-  if(tool.startsWith("arrow-")){
-    if(!state.bondDraft){
-      state.bondDraft = { startPoint: {...pos}, x:pos.x, y:pos.y };
-      announce("Arrow start set. Move the keyboard cursor and press Enter to finish.");
-    } else {
-      const typeMap = { "arrow-forward":"SYNTHETIC_FORWARD", "arrow-eq":"EQUILIBRIUM", "arrow-res":"RESONANCE", "arrow-retro":"RETROSYNTHETIC" };
-      const id = uid("arrow");
-      const start = state.bondDraft.startPoint;
-      state.scene.arrows[id] = { id, arrowType: typeMap[tool], x1:start.x, y1:start.y, x2:pos.x, y2:pos.y, conditionsTop:"", conditionsBottom:"" };
-      state.bondDraft = null;
-      pushHistory(); setTool("select"); selectEntity("arrow", id);
-      announce("Reaction arrow added.");
-    }
-  }
-}
-
-/* Global shortcuts that should work regardless of focus (except while typing) */
-window.addEventListener("keydown", (e) => {
-  if(isTypingTarget(e)) return;
-
-  if(e.code === "Space"){ state.spaceHeld = true; svg.classList.add("pan-mode"); }
-
-  const mod = e.ctrlKey || e.metaKey;
-  if(mod && e.key.toLowerCase() === "z"){
-    e.preventDefault();
-    if(e.shiftKey) redo(); else undo();
-    return;
-  }
-  if(mod && e.key.toLowerCase() === "y"){ e.preventDefault(); redo(); return; }
-
-  const toolKeys = { v:"select", a:"atom", b:"bond", t:"text", e:"erase", r:"arrow-forward" };
-  const elKeys = { c:"C", n:"N", o:"O", s:"S", p:"P", f:"F", h:"H" }; // 'b' is reserved for the Bond tool below
-  const k = e.key.toLowerCase();
-
-  if(elKeys[k]){
-    // With an atom selected, an element key is a fast relabel (mirrors how
-    // chemistry drawing tools let you correct an atom without re-picking a
-    // tool). Otherwise it sets the element and switches to the Atom tool,
-    // so "type a letter, then click" works from anywhere.
-    if(state.tool === "select" && state.selection && state.selection.kind === "atom"){
-      const atom = state.scene.atoms[state.selection.id];
-      if(atom){
-        atom.element = elKeys[k];
-        pushHistory(); renderAll();
-        announce("Relabeled selected atom to " + elKeys[k] + ".");
-        return;
-      }
-    }
-    setElement(elKeys[k]);
-    if(state.tool !== "atom") setTool("atom");
-    return;
-  }
-
-  if(toolKeys[k] && document.activeElement !== $("#doc-name")){
-    setTool(toolKeys[k]);
-    return;
-  }
-});
-window.addEventListener("keyup", (e) => {
-  if(e.code === "Space"){ state.spaceHeld = false; svg.classList.remove("pan-mode"); }
-});
 
 /* =========================================================================
    17. EXPORT
@@ -2231,11 +1990,9 @@ function buildExportSvg(){
     }
   });
   Object.values(state.scene.atoms).forEach(atom => {
-    const label = atomLabelText(atom); if(!label) return;
     const v = atomValenceInfo(atom);
-    let text = label;
-    if(v.checked && v.hCount>0) text += "H" + (v.hCount>1?subDigits(v.hCount):"");
-    text += chargeSuperscript(atom.charge);
+    const text = formatAtomDisplay(atom, v);
+    if(!text) return;
     const w = Math.max(text.length*style.fontSize*0.62, style.fontSize*0.9);
     g.appendChild(el("rect", { x:atom.x-w/2, y:atom.y-style.fontSize*0.62, width:w, height:style.fontSize*1.2, fill:"#FFFFFF" }));
     const t = el("text", { x:atom.x, y:atom.y, "text-anchor":"middle", "dominant-baseline":"central", "font-family":"IBM Plex Mono, monospace", "font-size":style.fontSize, "font-weight":600, fill:"#1F2937" });
@@ -2338,92 +2095,96 @@ async function copyImage(){
 }
 
 /* =========================================================================
-   18. TEMPLATES
-   Every template is just a SMILES string, so the same import engine used
-   for pasted notation draws these — one code path, easy to extend.
+   18. TEMPLATES & CLEANUP
    ========================================================================= */
-const TEMPLATES = [
-  ["Solvents & small molecules", [
-    ["Water", "O"], ["Methane", "C"], ["Ethanol", "CCO"], ["Acetone", "CC(=O)C"],
-    ["Diethyl ether", "CCOCC"], ["Dichloromethane", "ClCCl"], ["Chloroform", "ClC(Cl)Cl"],
-    ["Acetonitrile", "CC#N"], ["DMSO", "CS(=O)C"], ["THF", "C1CCOC1"], ["Toluene", "Cc1ccccc1"]
-  ]],
-  ["Functional groups", [
-    ["Carboxylic acid (acetic acid)", "CC(=O)O"], ["Ester (methyl acetate)", "CC(=O)OC"],
-    ["Amide (acetamide)", "CC(=O)N"], ["Amine (ethylamine)", "CCN"], ["Aldehyde (acetaldehyde)", "CC=O"],
-    ["Ether (dimethyl ether)", "COC"], ["Nitrile (acetonitrile)", "CC#N"], ["Urea", "NC(=O)N"],
-    ["Sulfone", "CS(=O)(=O)C"], ["Nitro group (nitromethane)", "C[N+](=O)[O-]"]
-  ]],
-  ["Rings & heterocycles", [
-    ["Benzene", "c1ccccc1"], ["Cyclohexane", "C1CCCCC1"], ["Cyclopentane", "C1CCCC1"],
-    ["Cyclopropane", "C1CC1"], ["Pyridine", "c1ccncc1"], ["Pyrimidine", "c1ccncn1"],
-    ["Furan", "c1ccoc1"], ["Thiophene", "c1ccsc1"], ["Pyrrole", "c1cc[nH]c1"], ["Imidazole", "c1cnc[nH]1"],
-    ["Naphthalene", "c1ccc2ccccc2c1"]
-  ]],
-  ["Amino acids", [
-    ["Glycine", "NCC(=O)O"], ["Alanine", "CC(N)C(=O)O"], ["Serine", "OCC(N)C(=O)O"],
-    ["Phenylalanine", "NC(Cc1ccccc1)C(=O)O"], ["Proline", "O=C(O)C1CCCN1"]
-  ]],
-  ["Familiar molecules", [
-    ["Aspirin", "CC(=O)Oc1ccccc1C(=O)O"], ["Ibuprofen", "CC(C)Cc1ccc(cc1)C(C)C(=O)O"],
-    ["Paracetamol", "CC(=O)Nc1ccc(O)cc1"], ["Caffeine", "Cn1cnc2c1c(=O)n(C)c(=O)n2C"],
-    ["Glucose", "OCC1OC(O)C(O)C(O)C1O"]
-  ]]
-];
+function insertRingAt(cx, cy, sides, aromatic){
+  const L = currentStyle().bondLength;
+  const r = L / (2 * Math.sin(Math.PI / sides));
+  const ids = [];
+  const startAngle = -Math.PI / 2;
+  for(let i=0; i<sides; i++){
+    const angle = startAngle + i * (2 * Math.PI / sides);
+    ids.push(addAtom({ x: cx + r * Math.cos(angle), y: cy + r * Math.sin(angle) }, "C"));
+  }
+  for(let i=0; i<sides; i++){
+    const bondId = createOrCycleBond(ids[i], ids[(i+1)%sides]);
+    if(aromatic && i % 2 === 0){
+      state.scene.bonds[bondId].order = 2;
+    }
+  }
+  pushHistory();
+  renderAll();
+  const name = aromatic ? "Benzene ring" : (sides === 3 ? "Cyclopropane" : sides === 5 ? "Cyclopentane" : "Cyclohexane");
+  announce(name + " inserted.");
+}
 
-function populateTemplateSelect(){
-  const select = $("#template-select");
-  select.innerHTML = "";
-  TEMPLATES.forEach(([category, items]) => {
-    const group = document.createElement("optgroup");
-    group.label = category;
-    items.forEach(([name, smiles]) => {
-      const opt = document.createElement("option");
-      opt.value = smiles; opt.textContent = name;
-      group.appendChild(opt);
+function insertBenzeneAt(cx, cy){
+  insertRingAt(cx, cy, 6, true);
+}
+
+function insertGlycineAt(cx, cy){
+  const L = currentStyle().bondLength;
+  const n = addAtom({ x:cx-L, y:cy }, "N");
+  const ca = addAtom({ x:cx, y:cy }, "C");
+  const c = addAtom({ x:cx+L*0.87, y:cy-L*0.5 }, "C");
+  const o1 = addAtom({ x:cx+L*1.73, y:cy }, "O");
+  const o2 = addAtom({ x:cx+L*0.87, y:cy-L*1.5 }, "O");
+  createOrCycleBond(n, ca);
+  createOrCycleBond(ca, c);
+  createOrCycleBond(c, o1);
+  const dbl = createOrCycleBond(c, o2); state.scene.bonds[dbl].order = 2;
+  pushHistory(); renderAll(); announce("Glycine inserted.");
+}
+
+function cleanUpStructure(){
+  const atoms = Object.values(state.scene.atoms);
+  if(atoms.length === 0){ announce("Nothing on canvas to clean up."); return; }
+
+  const L = currentStyle().bondLength;
+  const visited = new Set();
+  const queue = [atoms[0].id];
+  visited.add(atoms[0].id);
+
+  while(queue.length > 0){
+    const currId = queue.shift();
+    const currAtom = state.scene.atoms[currId];
+    if(!currAtom) continue;
+
+    bondsOfAtom(currId).forEach(bond => {
+      const otherId = bond.a1 === currId ? bond.a2 : bond.a1;
+      const otherAtom = state.scene.atoms[otherId];
+      if(!otherAtom) return;
+
+      if(!visited.has(otherId)){
+        visited.add(otherId);
+        const dx = otherAtom.x - currAtom.x;
+        const dy = otherAtom.y - currAtom.y;
+        let angle = Math.atan2(dy, dx);
+        angle = Math.round(angle / (Math.PI / 6)) * (Math.PI / 6);
+        otherAtom.x = currAtom.x + L * Math.cos(angle);
+        otherAtom.y = currAtom.y + L * Math.sin(angle);
+        queue.push(otherId);
+      }
     });
-    select.appendChild(group);
-  });
-}
-
-function insertTemplateAtCursor(){
-  const select = $("#template-select");
-  const smiles = select.value;
-  const name = select.options[select.selectedIndex] ? select.options[select.selectedIndex].textContent : "Template";
-  try{
-    insertSmiles(smiles, state.keyboardCursor);
-    pushHistory();
-    setTool("select");
-    renderAll();
-    announce(name + " inserted.");
-  }catch(err){
-    announce("Couldn't insert that template: " + err.message);
   }
-}
 
-function insertSmilesFromInput(){
-  const input = $("#smiles-input");
-  const errorEl = $("#smiles-error");
-  const raw = input.value.trim();
-  errorEl.textContent = "";
-  if(!raw){ errorEl.textContent = "Type or paste a SMILES string first."; return; }
-  try{
-    const ids = insertSmiles(raw, state.keyboardCursor);
-    pushHistory();
-    setTool("select");
-    renderAll();
-    announce("Imported structure with " + ids.length + " atom(s).");
-    input.value = "";
-  }catch(err){
-    errorEl.textContent = "Couldn't parse that SMILES: " + err.message;
-    announce("SMILES import failed: " + err.message);
+  if(state.gridSnap){
+    atoms.forEach(a => {
+      const p = snapToGrid(a);
+      a.x = p.x; a.y = p.y;
+    });
   }
+
+  pushHistory();
+  renderAll();
+  announce("Structure cleaned and standardized.");
 }
 
 /* =========================================================================
    19. UI WIRING
    ========================================================================= */
 document.querySelectorAll("[data-tool]").forEach(btn => btn.addEventListener("click", () => setTool(btn.dataset.tool)));
+document.querySelectorAll("[data-bond-type]").forEach(btn => btn.addEventListener("click", () => setBondType(btn.dataset.bondType)));
 document.querySelectorAll("[data-el]").forEach(btn => btn.addEventListener("click", () => { setElement(btn.dataset.el); if(state.tool!=="atom") setTool("atom"); }));
 
 $("#custom-el-go").addEventListener("click", () => {
@@ -2439,18 +2200,30 @@ $("#btn-redo").addEventListener("click", redo);
 $("#btn-export-svg").addEventListener("click", exportSVG);
 $("#btn-export-png").addEventListener("click", exportPNG);
 $("#btn-copy-image").addEventListener("click", copyImage);
+$("#btn-clean-2d").addEventListener("click", cleanUpStructure);
+
+$("#btn-clear-canvas").addEventListener("click", () => {
+  if(Object.keys(state.scene.atoms).length === 0 && Object.keys(state.scene.texts).length === 0) return;
+  state.scene.atoms = {};
+  state.scene.bonds = {};
+  state.scene.arrows = {};
+  state.scene.texts = {};
+  state.selectedAtoms.clear();
+  state.selectedBonds.clear();
+  state.selection = null;
+  pushHistory();
+  renderAll();
+  announce("Canvas cleared.");
+});
 
 $("#btn-new-doc").addEventListener("click", () => {
   if(!confirm("Start a new document? Unsaved changes to the current one will be replaced.")) return;
   state.scene = emptyScene();
   state.selection = null;
-  state.bondDraft = null;
+  state.selectedAtoms.clear();
+  state.selectedBonds.clear();
   state.history = []; state.historyIndex = -1;
   $("#doc-name").value = state.scene.title;
-  $("#smiles-input").value = "";
-  $("#smiles-error").textContent = "";
-  setTool("select");
-  setElement("C");
   pushHistory();
   renderAll();
   announce("New document started.");
@@ -2472,11 +2245,11 @@ $("#chk-angle-snap").addEventListener("change", (e) => { state.angleSnap = e.tar
 $("#font-scale").addEventListener("change", (e) => { document.body.style.fontSize = e.target.value + "px"; });
 $("#style-preset").addEventListener("change", (e) => { state.scene.stylePreset = e.target.value; pushHistory(); renderAll(); });
 
-$("#tpl-insert").addEventListener("click", insertTemplateAtCursor);
-$("#smiles-insert").addEventListener("click", insertSmilesFromInput);
-$("#smiles-input").addEventListener("keydown", (e) => {
-  if(e.key === "Enter"){ e.preventDefault(); insertSmilesFromInput(); }
-});
+$("#tpl-benzene").addEventListener("click", () => insertRingAt(state.keyboardCursor.x, state.keyboardCursor.y, 6, true));
+$("#tpl-cyclohexane").addEventListener("click", () => insertRingAt(state.keyboardCursor.x, state.keyboardCursor.y, 6, false));
+$("#tpl-cyclopentane").addEventListener("click", () => insertRingAt(state.keyboardCursor.x, state.keyboardCursor.y, 5, false));
+$("#tpl-cyclopropane").addEventListener("click", () => insertRingAt(state.keyboardCursor.x, state.keyboardCursor.y, 3, false));
+$("#tpl-glycine").addEventListener("click", () => insertGlycineAt(state.keyboardCursor.x, state.keyboardCursor.y));
 
 window.addEventListener("resize", () => {});
 
@@ -2484,7 +2257,6 @@ window.addEventListener("resize", () => {});
    20. INIT
    ========================================================================= */
 async function init(){
-  populateTemplateSelect();
   const loaded = await loadOnStart();
   if(!loaded){
     // Seed a tiny example (ethanol) so first-time users see how a structure looks.
