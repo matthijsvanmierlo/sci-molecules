@@ -420,10 +420,10 @@
         <summary>Keyboard shortcuts &amp; help</summary>
         <div class="details-body">
           <p><kbd>V</kbd> select &nbsp;<kbd>A</kbd> atom &nbsp;<kbd>B</kbd> bond &nbsp;<kbd>T</kbd> text &nbsp;<kbd>E</kbd> erase &nbsp;<kbd>R</kbd> arrow</p>
-          <p><kbd>C N O S P F H B</kbd> pick element while Atom tool is active</p>
-          <p><kbd>Ctrl/Cmd+Z</kbd> undo &nbsp;<kbd>Ctrl/Cmd+Shift+Z</kbd> redo</p>
+          <p><kbd>1 2 3 W H</kbd> bond type &nbsp;<kbd>C N O S P F H</kbd> pick element / mutate selection</p>
+          <p><kbd>Ctrl/Cmd+Z</kbd> undo &nbsp;<kbd>Ctrl/Cmd+Shift+Z</kbd> redo &nbsp;<kbd>Ctrl/Cmd+A</kbd> select all</p>
           <p><kbd>Delete</kbd> remove selection &nbsp;<kbd>Arrows</kbd> nudge selection or move keyboard cursor</p>
-          <p><kbd>Enter</kbd> perform active tool at keyboard cursor &nbsp;<kbd>Esc</kbd> cancel</p>
+          <p><kbd>Shift+Click</kbd> center target on canvas &nbsp;<kbd>Enter</kbd> perform active tool at cursor &nbsp;<kbd>Esc</kbd> cancel</p>
           <p>Click an existing bond with the Bond tool to cycle single &rarr; double &rarr; triple &rarr; wedge &rarr; hash.</p>
           <p>Mouse wheel zooms toward the pointer. Hold <kbd>Space</kbd> and drag, or drag with the middle mouse button, to pan.</p>
         </div>
@@ -593,6 +593,7 @@ function atomLabelText(atom){
 }
 
 function formatAtomDisplay(atom, valence){
+  if(!valence) valence = atomValenceInfo(atom);
   const label = atomLabelText(atom);
   if(!label) return null;
   const numH = (valence && valence.checked && valence.implicitH > 0) ? valence.implicitH : 0;
@@ -1476,6 +1477,17 @@ function resetZoom(){
   announce("Zoom reset.");
 }
 
+function centerOnWorldPos(pos, label){
+  const vb = svg.viewBox && svg.viewBox.baseVal;
+  const cx = vb && vb.width ? vb.width / 2 : 500;
+  const cy = vb && vb.height ? vb.height / 2 : 340;
+  state.pan.x = cx - pos.x * state.zoom;
+  state.pan.y = cy - pos.y * state.zoom;
+  state.keyboardCursor = { x: Math.round(pos.x), y: Math.round(pos.y) };
+  renderAll();
+  announce(label ? `Centered on ${label}.` : "Centered canvas.");
+}
+
 /* =========================================================================
    14. TOOL / UI STATE
    ========================================================================= */
@@ -1602,6 +1614,52 @@ svg.addEventListener("pointerdown", (e) => {
     return;
   }
 
+  // Shift-click to center target on the canvas window
+  if(e.shiftKey){
+    const hitAtom = findAtomNear(world, CONNECT_SNAP_RADIUS);
+    if(hitAtom){
+      state.selectedAtoms.clear();
+      state.selectedBonds.clear();
+      state.selectedAtoms.add(hitAtom.id);
+      state.selection = { kind: "atom", id: hitAtom.id };
+      centerOnWorldPos(hitAtom, `${hitAtom.element} atom`);
+      return;
+    }
+    const hitBond = findBondNear(world, 14);
+    if(hitBond){
+      const a1 = state.scene.atoms[hitBond.a1], a2 = state.scene.atoms[hitBond.a2];
+      if(a1 && a2){
+        state.selectedAtoms.clear();
+        state.selectedBonds.clear();
+        state.selectedBonds.add(hitBond.id);
+        state.selection = { kind: "bond", id: hitBond.id };
+        centerOnWorldPos({ x: (a1.x + a2.x) / 2, y: (a1.y + a2.y) / 2 }, "bond");
+        return;
+      }
+    }
+    const hitEntity = findEntityNear(world);
+    if(hitEntity){
+      state.selectedAtoms.clear();
+      state.selectedBonds.clear();
+      state.selection = { kind: hitEntity.kind, id: hitEntity.id };
+      if(hitEntity.kind === "text"){
+        const t = state.scene.texts[hitEntity.id];
+        if(t){
+          centerOnWorldPos(t, `text "${t.text}"`);
+          return;
+        }
+      } else if(hitEntity.kind === "arrow"){
+        const a = state.scene.arrows[hitEntity.id];
+        if(a){
+          centerOnWorldPos({ x: (a.x1 + a.x2) / 2, y: (a.y1 + a.y2) / 2 }, "reaction arrow");
+          return;
+        }
+      }
+    }
+    centerOnWorldPos(world, "canvas point");
+    return;
+  }
+
   // Alt/Option-drag in Bond or Atom tool: move atom directly without switching tools!
   if((state.tool === "bond" || state.tool === "atom") && (e.altKey || e.button === 2)){
     const hitAtom = findAtomNear(world, CONNECT_SNAP_RADIUS);
@@ -1617,7 +1675,7 @@ svg.addEventListener("pointerdown", (e) => {
     const hitBond = hitAtom ? null : findBondNear(world, 14);
 
     if(hitAtom){
-      if(e.shiftKey){
+      if(e.ctrlKey || e.metaKey){
         if(state.selectedAtoms.has(hitAtom.id)) state.selectedAtoms.delete(hitAtom.id);
         else state.selectedAtoms.add(hitAtom.id);
       } else if(!state.selectedAtoms.has(hitAtom.id)){
@@ -1637,7 +1695,7 @@ svg.addEventListener("pointerdown", (e) => {
     }
 
     if(hitBond){
-      if(e.shiftKey){
+      if(e.ctrlKey || e.metaKey){
         state.selectedBonds.add(hitBond.id);
         state.selectedAtoms.add(hitBond.a1);
         state.selectedAtoms.add(hitBond.a2);
@@ -1670,7 +1728,7 @@ svg.addEventListener("pointerdown", (e) => {
     }
 
     // Empty canvas click in Select tool: start Marquee selection
-    if(!e.shiftKey){
+    if(!e.ctrlKey && !e.metaKey){
       state.selectedAtoms.clear();
       state.selectedBonds.clear();
       state.selection = null;
@@ -1947,6 +2005,318 @@ svg.addEventListener("dblclick", (e) => {
 
 svg.addEventListener("pointerup", endPointerInteraction);
 svg.addEventListener("pointercancel", endPointerInteraction);
+
+/* =========================================================================
+   16. KEYBOARD INTERACTION & SHORTCUTS
+   ========================================================================= */
+function isEditingText(target){
+  if(!target) return false;
+  const tag = target.tagName ? target.tagName.toUpperCase() : "";
+  return tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable;
+}
+
+function deleteSelected(){
+  let deleted = false;
+  if(state.selectedAtoms.size > 0 || state.selectedBonds.size > 0){
+    state.selectedBonds.forEach(id => deleteEntity("bond", id));
+    state.selectedAtoms.forEach(id => deleteEntity("atom", id));
+    state.selectedAtoms.clear();
+    state.selectedBonds.clear();
+    state.selection = null;
+    deleted = true;
+  } else if(state.selection){
+    deleteEntity(state.selection.kind, state.selection.id);
+    state.selection = null;
+    deleted = true;
+  }
+  if(deleted){
+    pushHistory();
+    renderAll();
+    announce("Deleted selection.");
+  }
+}
+
+function performActiveToolAtCursor(){
+  const p = { ...state.keyboardCursor };
+  if(state.tool === "atom"){
+    const hit = findAtomNear(p, CONNECT_SNAP_RADIUS);
+    if(hit){
+      hit.element = state.currentElement;
+      pushHistory();
+      renderAll();
+      announce(`Atom relabeled ${state.currentElement}.`);
+    } else {
+      addAtom(p, state.currentElement);
+      pushHistory();
+      renderAll();
+      announce(`${state.currentElement} atom placed at cursor.`);
+    }
+  } else if(state.tool === "bond"){
+    const hit = findAtomNear(p, CONNECT_SNAP_RADIUS);
+    if(hit){
+      smartSproutBond(hit);
+    } else {
+      const newAtomId = addAtom(p, "C");
+      const newAtom = state.scene.atoms[newAtomId];
+      smartSproutBond(newAtom);
+    }
+  } else if(state.tool === "select"){
+    const hitAtom = findAtomNear(p, CONNECT_SNAP_RADIUS);
+    if(hitAtom){
+      state.selectedAtoms.clear();
+      state.selectedBonds.clear();
+      state.selectedAtoms.add(hitAtom.id);
+      selectEntity("atom", hitAtom.id);
+      return;
+    }
+    const hitBond = findBondNear(p, 14);
+    if(hitBond){
+      state.selectedAtoms.clear();
+      state.selectedBonds.clear();
+      state.selectedBonds.add(hitBond.id);
+      selectEntity("bond", hitBond.id);
+      return;
+    }
+    const hit = findEntityNear(p);
+    if(hit){
+      selectEntity(hit.kind, hit.id);
+    } else {
+      state.selection = null;
+      state.selectedAtoms.clear();
+      state.selectedBonds.clear();
+      renderAll();
+      announce("Deselected.");
+    }
+  } else if(state.tool === "erase"){
+    const hit = findEntityNear(p);
+    if(hit){
+      deleteEntity(hit.kind, hit.id);
+      state.selection = null;
+      pushHistory();
+      renderAll();
+      announce(`Erased ${hit.kind}.`);
+    }
+  } else if(state.tool === "text"){
+    const id = uid("text");
+    state.scene.texts[id] = { id, x: p.x, y: p.y, text: "Label", fontSizePt: 14, isBold: false };
+    selectEntity("text", id);
+    pushHistory();
+    renderAll();
+    announce("Text label placed at cursor.");
+  } else if(state.tool.startsWith("arrow-")){
+    const typeMap = { "arrow-forward":"FORWARD", "arrow-eq":"EQUILIBRIUM", "arrow-res":"RESONANCE", "arrow-retro":"RETRO" };
+    const id = uid("arrow");
+    state.scene.arrows[id] = { id, arrowType: typeMap[state.tool], x1: p.x, y1: p.y, x2: p.x + 80, y2: p.y, conditionsTop: "", conditionsBottom: "" };
+    selectEntity("arrow", id);
+    pushHistory();
+    renderAll();
+    announce("Reaction arrow placed at cursor.");
+  }
+}
+
+// Mouse wheel zoom on canvas
+svg.addEventListener("wheel", (e) => {
+  e.preventDefault();
+  const factor = e.deltaY < 0 ? 1.1 : 0.9;
+  zoomAt(e.clientX, e.clientY, factor);
+}, { passive: false });
+
+svg.addEventListener("focus", () => renderKeyboardCursor());
+svg.addEventListener("blur", () => renderKeyboardCursor());
+
+window.addEventListener("keydown", (e) => {
+  if(isEditingText(e.target)) return;
+
+  const keyUpper = e.key.toUpperCase();
+  const isCtrlOrCmd = e.ctrlKey || e.metaKey;
+
+  // Undo / Redo
+  if(isCtrlOrCmd && keyUpper === "Z"){
+    e.preventDefault();
+    if(e.shiftKey) redo();
+    else undo();
+    return;
+  }
+  if(isCtrlOrCmd && keyUpper === "Y"){
+    e.preventDefault();
+    redo();
+    return;
+  }
+
+  // Select All
+  if(isCtrlOrCmd && keyUpper === "A"){
+    e.preventDefault();
+    state.selectedAtoms = new Set(Object.keys(state.scene.atoms));
+    state.selectedBonds = new Set(Object.keys(state.scene.bonds));
+    state.selection = state.selectedAtoms.size > 0 ? { kind: "group", count: state.selectedAtoms.size } : null;
+    renderAll();
+    announce(`Selected all (${state.selectedAtoms.size} atoms, ${state.selectedBonds.size} bonds).`);
+    return;
+  }
+
+  // Delete / Backspace
+  if(e.key === "Delete" || e.key === "Backspace"){
+    e.preventDefault();
+    deleteSelected();
+    return;
+  }
+
+  // Escape: cancel drafts & clear selection
+  if(e.key === "Escape"){
+    state.bondDraft = null;
+    state.marqueeDraft = null;
+    state.arrowDraft = null;
+    state.selection = null;
+    state.selectedAtoms.clear();
+    state.selectedBonds.clear();
+    renderAll();
+    announce("Cancelled / deselected.");
+    return;
+  }
+
+  // Spacebar pan mode
+  if(e.code === "Space" && !state.spaceHeld){
+    e.preventDefault();
+    state.spaceHeld = true;
+    svg.classList.add("panning");
+    return;
+  }
+
+  // If holding Ctrl/Cmd/Alt/Meta, do not match single-key shortcuts
+  if(isCtrlOrCmd || e.altKey) return;
+
+  // Tools menu keyboard shortcuts
+  if(keyUpper === "V"){
+    setTool("select");
+    return;
+  }
+  if(keyUpper === "A"){
+    setTool("atom");
+    return;
+  }
+  if(keyUpper === "B"){
+    setTool("bond");
+    return;
+  }
+  if(keyUpper === "T"){
+    setTool("text");
+    return;
+  }
+  if(keyUpper === "E"){
+    setTool("erase");
+    return;
+  }
+  if(keyUpper === "R"){
+    setTool("arrow-forward");
+    return;
+  }
+
+  // Bond order shortcuts
+  if(e.key === "1"){
+    setBondType("1");
+    return;
+  }
+  if(e.key === "2"){
+    setBondType("2");
+    return;
+  }
+  if(e.key === "3"){
+    setBondType("3");
+    return;
+  }
+  if(keyUpper === "W"){
+    setBondType("WEDGE");
+    return;
+  }
+  if(keyUpper === "H" && state.tool === "bond"){
+    setBondType("HASH");
+    return;
+  }
+
+  // Element picker shortcuts
+  const ELEMENT_KEYS = ["C", "N", "O", "S", "P", "F", "H"];
+  if(ELEMENT_KEYS.includes(keyUpper)){
+    setElement(keyUpper);
+    let mutated = false;
+    if(state.selectedAtoms.size > 0){
+      state.selectedAtoms.forEach(id => {
+        const a = state.scene.atoms[id];
+        if(a){ a.element = keyUpper; mutated = true; }
+      });
+    } else if(state.selection && state.selection.kind === "atom"){
+      const a = state.scene.atoms[state.selection.id];
+      if(a){ a.element = keyUpper; mutated = true; }
+    }
+    if(mutated){
+      pushHistory();
+      renderAll();
+      announce(`Changed atom(s) to ${keyUpper}.`);
+    } else {
+      if(state.tool !== "atom") setTool("atom");
+    }
+    return;
+  }
+
+  // Enter: perform active tool at keyboard cursor
+  if(e.key === "Enter"){
+    e.preventDefault();
+    performActiveToolAtCursor();
+    return;
+  }
+
+  // Arrow keys: move cursor or nudge selection
+  if(e.key.startsWith("Arrow")){
+    e.preventDefault();
+    const isSelectionActive = (state.selectedAtoms.size > 0) || (state.selection != null);
+    const step = isSelectionActive ? (e.shiftKey ? 20 : 5) : (e.shiftKey ? 40 : 20);
+    let dx = 0, dy = 0;
+    if(e.key === "ArrowLeft") dx = -step;
+    else if(e.key === "ArrowRight") dx = step;
+    else if(e.key === "ArrowUp") dy = -step;
+    else if(e.key === "ArrowDown") dy = step;
+
+    if(isSelectionActive){
+      if(state.selectedAtoms.size > 0){
+        state.selectedAtoms.forEach(id => {
+          const a = state.scene.atoms[id];
+          if(a){ a.x += dx; a.y += dy; }
+        });
+      } else if(state.selection){
+        const { kind, id } = state.selection;
+        if(kind === "atom"){
+          const a = state.scene.atoms[id]; if(a){ a.x += dx; a.y += dy; }
+        } else if(kind === "bond"){
+          const b = state.scene.bonds[id];
+          if(b){
+            const a1 = state.scene.atoms[b.a1], a2 = state.scene.atoms[b.a2];
+            if(a1){ a1.x += dx; a1.y += dy; }
+            if(a2){ a2.x += dx; a2.y += dy; }
+          }
+        } else if(kind === "text"){
+          const t = state.scene.texts[id]; if(t){ t.x += dx; t.y += dy; }
+        } else if(kind === "arrow"){
+          const a = state.scene.arrows[id]; if(a){ a.x1 += dx; a.y1 += dy; a.x2 += dx; a.y2 += dy; }
+        }
+      }
+      pushHistory();
+      renderAll();
+      announce("Nudged selection.");
+    } else {
+      state.keyboardCursor.x += dx;
+      state.keyboardCursor.y += dy;
+      renderKeyboardCursor();
+      announce(`Keyboard cursor at ${state.keyboardCursor.x}, ${state.keyboardCursor.y}`);
+    }
+    return;
+  }
+});
+
+window.addEventListener("keyup", (e) => {
+  if(e.code === "Space"){
+    state.spaceHeld = false;
+    if(!dragState || dragState.mode !== "pan") svg.classList.remove("panning");
+  }
+});
 
 /* =========================================================================
    17. EXPORT
